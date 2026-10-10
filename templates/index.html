@@ -1,0 +1,70 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Layerly | Edit your poster text</title>
+  <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.3/dist/css/bootstrap.min.css">
+  <link rel="stylesheet" href="{{ url_for('static', filename='css/style.css') }}">
+  <script defer src="https://cdnjs.cloudflare.com/ajax/libs/fabric.js/5.3.0/fabric.min.js"></script>
+  <script defer src="{{ url_for('static', filename='js/editor.js') }}"></script>
+</head>
+<body>
+{% macro logo() %}<button class="logo unstyled" data-screen="landing" aria-label="Layerly home"><span class="logo-mark">✧</span><span>Layerly</span></button>{% endmacro %}
+{% macro poster() %}<div class="poster-art"><div class="poster-orb"></div><div class="poster-grid"></div><div class="poster-brand"><span>NX</span><i>Studio</i></div><div class="poster-headline"><span>BEYOND</span><span>THE ORDINARY</span></div><div class="poster-date"><b>24–26</b><span>OCTOBER / 2026</span></div><div class="poster-footer"><span>CREATIVE SUMMIT</span><span>NEW YORK</span></div></div>{% endmacro %}
+<div id="notice" class="notice" role="status" aria-live="polite" hidden></div>
+<main id="landing" class="landing screen">
+  <nav class="nav page-width">{{ logo() }}<div class="nav-links"><a href="#how">How it works</a><a href="#features">Features</a></div><button class="button button-primary" data-screen="upload">Get Started →</button></nav>
+  <section class="hero page-width">
+    <div class="eyebrow">✧ AI-powered text reconstruction</div>
+    <h1>Turn any poster into an <em>editable design.</em></h1>
+    <p>Bring your poster’s text back to life. Upload an image, reconstruct its text layers, and make it your own.</p>
+    <div class="hero-actions"><button class="button button-primary button-large" data-screen="upload">↑ Upload Your Poster</button><span>PNG or JPEG · Up to 20 MB</span></div>
+    <div class="transformation-card" id="features">
+      <div class="transformation-label original-label"><span>01</span> Original image</div><div class="original-frame">{{ poster() }}</div>
+      <div class="transform-middle"><span class="ai-pulse">✧</span><b>Reconstruct editable text</b><div class="progress-dots"><i></i><i></i><i></i></div></div>
+      <div class="transformation-label layers-label"><span>02</span> Editable text</div>
+      <div class="exploded-poster"><div class="mini-layer layer-bg"><div class="poster-orb"></div></div><div class="mini-layer layer-type">BEYOND<br>THE ORDINARY</div><div class="mini-layer layer-date">24–26 OCT</div><div class="layer-tags"><span>Cleaned background</span><span>Text layers</span><span>Heading</span><span>Date</span></div></div>
+      <small class="illustration-label">Illustration of the reconstruction workflow</small>
+    </div>
+  </section>
+  <section class="steps page-width" id="how"><div class="section-heading"><span>Simple by design</span><h2>From flat image to creative control.</h2></div>
+    <div class="step-grid"><article class="step-card"><div class="step-icon">↑</div><span>01</span><h3>Upload your poster</h3><p>Drop in a PNG or JPEG. No source file needed.</p></article><article class="step-card"><div class="step-icon">T</div><span>02</span><h3>Reconstruct the text</h3><p>The backend detects text and repairs the background beneath it.</p></article><article class="step-card"><div class="step-icon">✧</div><span>03</span><h3>Edit it your way</h3><p>Adjust your text, typography and positioning. Download your finished PNG.</p></article></div>
+  </section>
+  <section class="cta page-width"><div><span>Ready to unlock your design?</span><h2>Your poster has more potential than pixels.</h2></div><button class="button button-light" data-screen="upload">Start creating →</button></section>
+  <footer class="footer page-width">{{ logo() }}<div><a href="#how">How it works</a><a href="#features">Features</a></div><span>© 2026 Layerly</span></footer>
+</main>
+<main id="upload" class="flow-page screen" hidden>
+  <nav class="flow-nav">{{ logo() }}<span>Step 1 of 3 · Upload</span><button class="button button-ghost" data-screen="landing">Exit ×</button></nav>
+  <section class="upload-wrap"><div class="flow-heading"><span class="step-pill">01</span><h1>Upload your poster</h1><p>Choose a poster to reconstruct its text as editable layers.</p></div>
+    <div id="dropZone" class="drop-zone"><input id="fileInput" type="file" accept="image/png,image/jpeg"><div id="uploadEmpty"><div class="upload-icon">↑</div><h2>Drop your poster here</h2><p>or choose a file from your computer</p></div><img id="originalPreview" alt="Original uploaded poster" hidden><button id="chooseFile" class="button button-secondary">Choose image</button><small id="fileDetails">PNG or JPEG · Maximum 20 MB</small></div>
+    <div id="uploadMessage" class="inline-message" role="status" hidden></div>
+    <div class="upload-footer"><button class="button button-ghost" data-screen="landing">Back</button><button id="extract" class="button button-primary" disabled>Extract Text →</button></div>
+    <div class="demo-entry"><button id="demo" class="button button-ghost">Try the labelled editor demo</button><small>Synthetic poster and preset text. No extraction is performed.</small></div>
+  </section>
+</main>
+<main id="processing" class="processing screen" hidden>
+  {{ logo() }}<div class="processing-content"><div class="scan-card"><img id="processingPreview" alt="Poster being sent to the backend"><div class="scan-line"></div><span class="scan-badge">✧ Backend reconstruction</span></div><div class="processing-copy"><div class="spinner"><span></span></div><h1>Reconstructing your text</h1><p>Waiting for detected text layers and a repaired background from the backend.</p><button id="cancel" class="button button-secondary">Cancel</button></div></div>
+</main>
+<main id="editor" class="editor screen" hidden>
+  <header class="editor-topbar">{{ logo() }}<div class="file-info"><b id="projectName">Your poster</b><span id="projectStatus">Edits stay in this browser tab</span></div><div class="history-tools"><button id="undo" title="Undo (Ctrl/Cmd+Z)" aria-label="Undo" disabled>↶</button><button id="redo" title="Redo (Ctrl/Cmd+Shift+Z)" aria-label="Redo" disabled>↷</button></div><div class="top-actions"><button class="button button-secondary" data-screen="upload">New poster</button><button id="export" class="button button-primary">↓ Download PNG</button></div></header>
+  <div class="editor-body">
+    <aside class="layers-panel"><div class="panel-title"><div><b>Text layers</b></div><span id="layerCount">0 layers</span></div><div id="layerList" class="layer-list"></div><div class="panel-actions"><button id="addText" class="button button-secondary">+ Add text</button></div><div class="detection-note"><span>✧</span><div><b id="backgroundLabel">Background is repaired</b><span>Only text layers are editable.</span></div></div></aside>
+    <section class="canvas-area"><div class="canvas-top"><span id="dimensions">Canvas</span><div><button id="zoomOut" aria-label="Zoom out">−</button><b id="zoomLabel">100%</b><button id="zoomIn" aria-label="Zoom in">+</button><button id="fit" class="fit-button">Fit</button></div></div><div id="canvasStage" class="canvas-stage"><div id="canvasHolder"><canvas id="posterCanvas" aria-label="Editable poster canvas"></canvas></div></div><div class="command-footer"><section class="ai-panel" aria-label="AI text commands">
+      <div class="ai-panel-title"><span aria-hidden="true">✧</span><div><b>Edit text with AI</b><small id="commandMode">Flask AI backend</small></div></div>
+      <p id="commandTarget" class="command-target">Selected: no text layer</p>
+      <form id="commandForm" class="prompt-box"><label for="commandPrompt" class="visually-hidden">Text editing instruction</label><textarea id="commandPrompt" rows="1" maxlength="2000" placeholder="Describe how you want to change the text..."></textarea><button id="applyCommand" class="button button-primary" type="submit">Apply</button></form>
+      <div class="prompt-suggestions"><span>Try</span><button type="button" data-command="Change the text color to blue">Blue text</button><button type="button" data-command="Make the heading bold">Bold heading</button><button type="button" data-command="Change all text colors to white">All text white</button></div>
+      <p id="commandMessage" class="command-message" role="status" aria-live="polite"></p>
+    </section><div class="editor-help"><b id="modeLabel">Text editor</b><p>Click a layer to select it. Double-click text to type. Drag to move; use the corner handles to scale and the top handle to rotate.</p><div id="warnings" role="status"></div></div></div></section>
+    <aside class="properties-panel"><div class="panel-title"><div><b>Properties</b></div><span class="property-type">TEXT</span></div><p id="selectHint" class="select-hint">Select a text layer to edit its properties.</p>
+      <fieldset id="properties" disabled><div class="property-section"><label for="textContent">Content</label><textarea id="textContent" rows="3"></textarea><small id="confidence"></small></div>
+      <div class="property-section"><label for="fontFamily">Typography</label><select id="fontFamily" class="form-select form-select-sm"><option>Arial</option><option>DM Sans</option><option>Manrope</option><option>Georgia</option><option>Times New Roman</option><option>Courier New</option><option>Verdana</option></select><div class="control-row"><label for="fontSize">Size (px)<input id="fontSize" type="number" min="1" max="2000" class="form-control form-control-sm"></label><label for="alignment">Alignment<select id="alignment" class="form-select form-select-sm"><option value="left">Left</option><option value="center">Center</option><option value="right">Right</option><option value="justify">Justify</option></select></label></div><div class="toggle-row"><button id="bold" aria-pressed="false" type="button"><b>B</b></button><button id="italic" aria-pressed="false" type="button"><i>I</i></button></div></div>
+      <div class="property-section"><label for="textColor">Color</label><input id="textColor" type="color" value="#ffffff"><span id="colorHex">#FFFFFF</span></div>
+      <div class="property-section"><label>Position &amp; size (original pixels)</label><div class="position-grid">{% for id, title in [('posX','X'),('posY','Y'),('layerWidth','Width'),('layerHeight','Height'),('rotation','Rotation °')] %}<label for="{{id}}">{{title}}<input id="{{id}}" type="number" step="0.1" class="form-control form-control-sm" {% if id in ['layerWidth','layerHeight'] %}min="1"{% endif %}></label>{% endfor %}</div><small>Width and height scale the text. Side handles change its wrapping width.</small></div>
+      <div class="property-section"><button id="visibility" class="button button-secondary">Hide layer</button><button id="deleteText" class="button button-ghost danger">Delete layer</button></div></fieldset>
+    </aside>
+  </div>
+</main>
+<noscript><div class="alert alert-warning">Enable JavaScript to upload and edit posters.</div></noscript>
+</body>
+</html>
