@@ -1,12 +1,11 @@
 """Optional real-browser integration checks: python browser_command_checks.py.
 Requires test-only Playwright and installed Edge; OCR models must be available.
 """
-import io
-import json
 import tempfile
 import threading
 from pathlib import Path
 
+import numpy as np
 from PIL import Image, ImageDraw, ImageFont
 from playwright.sync_api import sync_playwright
 from werkzeug.serving import make_server
@@ -71,8 +70,8 @@ def main():
             downloaded.value.save_as(exported)
             with Image.open(exported) as image:
                 assert image.size == (800, 360)
-                pixels = list(image.convert('RGB').getdata())
-                assert any(b > 150 and r < 80 and g < 80 for r, g, b in pixels), 'Export must contain blue glyphs'
+                pixels = np.array(image.convert('RGB'))
+                assert ((pixels[:, :, 2] > 150) & (pixels[:, :, 0] < 80) & (pixels[:, :, 1] < 80)).any(), 'Export must contain blue glyphs'
             print('PASS: real upload -> PaddleOCR -> selected heading blue -> PNG with blue pixels', flush=True)
 
             command('All text white')
@@ -108,6 +107,22 @@ def main():
             assert current() == before
             page.unroute('**/api/edit-text')
             print('PASS: failed command and malformed response leave canvas/selection unchanged', flush=True)
+
+            # Exercise rollback after the first object has already been updated.
+            page.evaluate('''() => {
+              const object = testCanvas.getObjects()[1], originalSet = object.set;
+              object.set = function(key, value) {
+                if (key && key.fill === '#0000ff') {
+                  this.set = originalSet;
+                  throw new Error('Injected setter failure');
+                }
+                return originalSet.call(this, key, value);
+              };
+            }''')
+            command('All text blue', success=False)
+            assert current() == before
+            assert page.evaluate('testCanvas.getActiveObject().layerId') == heading
+            print('PASS: runtime failure rolls back partially applied edits', flush=True)
 
             page.evaluate('testCanvas.discardActiveObject(); testCanvas.requestRenderAll()')
             command('Blue text', success=False)

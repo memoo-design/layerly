@@ -111,65 +111,52 @@ For errors return non-2xx status and `{"error":"Human-readable explanation"}`. R
 7. Zoom out, zoom in and use Fit. Export at several zoom levels. Verify each downloaded PNG has the original width and height and the same content, without selection handles or hidden text.
 8. Test portrait, landscape and small images; check the layout on desktop and a narrow phone viewport. Verify both layer and property panels remain accessible.
 
-## Bottom AI text command bar
+## Text command bar
 
-The bottom panel follows the supplied sample's AI panel, prompt box, purple Apply button and suggestion chips. Its selection indicator shows the current layer's text and ID. Enter submits; Shift+Enter adds a newline. Processing, success and error messages appear below the prompt. Commands record one undo step and refresh the properties panel. They change Fabric text properties without replacing or regenerating the background.
+The existing command bar uses a deterministic local interpreter at `POST /api/edit-text`. It does not use a paid service or a general-purpose language model. Normal uploaded projects use Flask; the labelled synthetic demo retains its separate limited parser.
 
-Normal projects call `window.LayerlyAPI.requestTextEdit(payload, signal)` at `POST /api/edit-text`. A concurrent change added an offline command interpreter in `ai_edit_service.py`; that route was preserved during the OCR work. Its command behavior is outside this extraction task. Keep AI credentials and model calls on the server. Validate target IDs, allowed properties and values on the server as well as the client. Never execute model-generated code.
+Supported examples (case insensitive):
 
-Example request:
+- `Blue text` changes selected text; selection is required.
+- `Bold heading` and `Make heading bigger` target the heading.
+- `All text white` changes every editable text layer, including hidden layers.
+- `Change title color to red` targets the title.
+- `Change SALE to MEGA SALE` replaces matching words in a unique layer, or a matching selected layer. Replacement text is literal, even if it contains words such as "all text".
+- `Center selected text` centers horizontally using Fabric's scaled, rotated bounds and preserves y.
+- `Rotate selected text 15 degrees` sets its rotation.
+- `Change selected text size to 48`, `Make selected text italic`, and `Align selected text right` are also supported.
 
-```json
-{
-  "project_id": "poster-001",
-  "prompt": "Change the text color to blue",
-  "selected_layer_id": "headline",
-  "width": 1200,
-  "height": 1500,
-  "layers": [{
-    "id": "headline", "text": "Summer Sale",
-    "x": 120, "y": 540, "width": 960, "height": 130,
-    "rotation": 0, "scale_x": 1, "scale_y": 1,
-    "font_size": 110, "font_family": "Arial", "color": "#ffffff",
-    "font_weight": "normal", "font_style": "normal",
-    "text_align": "left", "visible": true
-  }]
-}
-```
+Explicit heading/title IDs or roles take priority. OCR layers have generated IDs, so a unique largest displayed font is used when no semantic role exists. If multiple candidate headings or matching text layers remain, the command asks for a selection. A generic selected-text command never guesses a layer when none is selected. Complex multi-action instructions and unsupported commands return an error without changes.
 
-`layers` contains every current text layer, including hidden layers, in original pixels. Width and height here are Fabric's unscaled text box dimensions; scale_x/scale_y preserve user transformations. Selected ID is null when there is no selection.
+### Edit snapshot contract
 
-Return HTTP 200 with structured patches, using existing IDs:
+The browser sends `project_id`, `prompt`, `selected_layer_id`, canvas `width`/`height`, and `layers`. Each layer contains its existing ID, text, x/y, unscaled width/height, rotation, scale_x/scale_y, typography, color, visibility, and original-coordinate horizontal bounds. `confidence` is optional OCR metadata: absent and null are accepted during editing. Present confidence must be a finite number from 0 through 1. Strings, booleans, NaN, infinity, and out-of-range values are rejected. Supported NumPy numbers are converted to native Python numbers before JSON output. Other geometry remains required and validated.
+
+The response contains `project_id`, `message`, `changes`, and normalized `layers` for snapshot compatibility. The editor applies only `changes`, for example:
 
 ```json
-{
-  "changes": [{"id": "headline", "properties": {"color": "#0000ff"}}],
-  "message": "Text color updated."
-}
+{"changes": [{"id": "existing-layer-id", "properties": {"color": "#0000ff"}}]}
 ```
 
-Allowed properties: text (up to 10,000 characters), color (six-digit hex), font_size (1–2000), font_family (Arial, DM Sans, Manrope, Georgia, Times New Roman, Courier New), font_weight (normal/bold), font_style (normal/italic), text_align (left/center/right/justify), x, y (finite values within ±100,000), rotation (±360 degrees), visible (boolean), and position (`"center"`). Center positions the rotated, scaled bounding box at the poster center; do not combine it with x/y. Omitted properties retain their values. No add/delete/background patches are accepted by this endpoint. Any invalid patch rejects the entire response before changes apply. The optional server message is not displayed; the client reports the actual number of modified layers.
+Only changed user-editable properties are returned in patches; confidence is never an editing instruction. IDs, background, confidence, scale factors, visibility and unrelated properties remain intact. The frontend maps snake_case fields to Fabric properties, validates the entire response before mutation, rejects stale results, updates existing objects, refreshes controls, and records one undo step. Character style overrides for the changed formatting property are cleared. Runtime setter failures roll back partially applied edits. No-op commands return an empty changes array and "No changes needed."
 
-Default target is the selected layer. An explicit all/every/each text request allows all layers. Heading commands target a single layer whose ID is heading, headline or title; if that is ambiguous, the user must select it and say selected text. Return a non-2xx response with `{"error":"Select the heading layer first."}` for unclear instructions. With no selection and no explicit target, the frontend asks for a selection without sending the request. Requests time out after 30 seconds. If the poster changes during a request, its response is rejected and the user can resubmit.
+The original error came from `currentLayers()` omitting confidence while `validate_layers()` required it. A second mismatch returned full layers to a frontend expecting changes. Both contracts are now synchronized; confidence is still required in OCR extraction responses.
 
-Only the existing synthetic **DEMO MODE** project uses a local rule parser. The bar labels it `DEMO MODE · Local rule parser, no AI service`. Normal uploaded projects never fall back to that parser. Demo examples:
+### Command regression checks
 
-- Change the selected text color to blue.
-- Change all text colors to white.
-- Make the heading bold.
-- Increase the selected text size to 48.
-- Replace the selected text with Summer Sale.
-- Move the selected text to the center.
+```powershell
+.\.venv\Scripts\python.exe -m unittest discover -v
+node --check static/js/editor.js
+```
 
-Additional manual checks:
+For optional browser tests (Playwright is a test-only dependency, not an application requirement):
 
-1. In demo mode, select a layer and submit each example by Apply and Enter. Check the selection indicator, canvas, and properties. Other layers and background must remain unchanged for selected-layer commands.
-2. Undo/redo each command. For an all-text command, verify every layer changes together as one history action.
-3. Deselect text on the canvas and submit an unclear command. Confirm the selection request. Submit an explicit all-text command and verify it works.
-4. In a normal reconstructed project, confirm `/api/edit-text` receives JSON with prompt, selected ID, dimensions and current layers. With the supplied route, confirm an unavailable message and unchanged canvas.
-5. Mock a valid response, then unknown IDs, duplicate IDs, extra layer targets, invalid colors/sizes and unsupported properties. Invalid responses must apply no partial edits.
-6. Simulate a slow request. Check Processing, disabled Apply, timeout, and rejection if the poster was edited while waiting. Export after a command at different zooms and confirm original dimensions.
+```powershell
+.\.venv\Scripts\python.exe -m pip install playwright
+.\.venv\Scripts\python.exe browser_command_checks.py
+```
 
+The browser script uses installed Microsoft Edge headlessly, cached or downloadable PaddleOCR models, the existing Fabric CDN asset, and a temporary Flask server. It runs real upload/extraction, commands, PNG download and pixel checks, failure atomicity, and manual layers without confidence. The pinned CDN asset path is Fabric 5.3.0; that bundle reports `fabric.version` as 5.1.0 at runtime. Tests exercise the actual loaded implementation.
 
 ## Local OCR and background repair
 
@@ -209,3 +196,6 @@ If the default model host stalls on first setup, set `$env:PADDLE_PDX_MODEL_SOUR
 Python 3.10.11, PaddleOCR 3.7.0, PaddlePaddle 3.3.1, PaddleX 3.7.2, NumPy 2.2.6, OpenCV 4.10.0 and Pillow 12.3.0 were installed and checked. `pip check` passes. Windows inference required disabling optional oneDNN/MKLDNN acceleration (`enable_mkldnn=False`), which is set in the service.
 
 All 12 extraction tests pass, together with existing layer and edit API validation checks. JavaScript syntax validation passes. A real CPU Flask extraction of an 800x300 synthetic poster recognized ?SUMMER SALE? with confidence 0.999628 and produced a separate, entirely white repaired PNG with the original black lettering removed. Browser selection, editing, and PNG export were not exercised in an automated browser; use the manual checklist above. The concurrent command-bar implementation was preserved; its old no-selection test now expects HTTP 422 instead of the former placeholder 501.
+
+
+Command-bar fix verification: all 28 unittest cases passed, including existing extraction/inpainting regressions. The real browser flow recognized a synthetic two-line poster, changed the selected heading to blue, exported an 800x360 PNG containing blue glyphs, and changed all text to white. Other requested commands, error atomicity, manual layers without confidence, unchanged IDs/background, and property-panel updates were checked in the same browser workflow.
