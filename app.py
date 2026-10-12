@@ -9,8 +9,8 @@ import numpy as np
 from flask import Flask, jsonify, render_template, request, url_for
 from PIL import Image, ImageOps, UnidentifiedImageError
 
-from layer_utils import validate_layers, ocr_results_to_layers
-from ai_edit_service import apply_command, CommandError
+from layer_utils import validate_layers, ocr_results_to_layers, normalize_edit_layers
+from ai_edit_service import apply_command, layer_changes, CommandError
 from ocr_service import ocr_service, OCRUnavailable, OCRProcessingError
 from background_service import repair_background, estimate_colors
 
@@ -99,12 +99,7 @@ def extract_text():
 
 @app.post("/api/edit-text")
 def edit_text():
-    """
-    Validate a text-editing request.
-
-    Actual AI prompt interpretation and text editing
-    will be connected later.
-    """
+    """Validate edit snapshots and return atomic property patches for existing layers."""
 
     data = request.get_json(silent=True)
 
@@ -142,10 +137,10 @@ def edit_text():
             error="Layers must be a list."
         ), 400
 
-    valid, message = validate_layers(layers)
-
-    if not valid:
-        return jsonify(error=message), 400
+    try:
+        layers = normalize_edit_layers(layers)
+    except ValueError as exc:
+        return jsonify(error=str(exc)), 400
 
     # If a layer was selected, ensure it exists in the request.
     if selected_layer_id is not None:
@@ -163,14 +158,17 @@ def edit_text():
             ), 400
 
     try:
-        edited_layers, explanation = apply_command(prompt, layers, selected_layer_id)
+        edited_layers, explanation = apply_command(prompt, layers, selected_layer_id, canvas_width=data.get("width"))
     except CommandError as exc:
         return jsonify(error=str(exc)), 422
 
-    valid, message = validate_layers(edited_layers)
-    if not valid:
-        return jsonify(error=message), 422
-    return jsonify(project_id=project_id, layers=edited_layers, message=explanation), 200
+    try:
+        edited_layers = normalize_edit_layers(edited_layers)
+    except ValueError as exc:
+        return jsonify(error=str(exc)), 422
+    changes = layer_changes(layers, edited_layers)
+    return jsonify(project_id=project_id, changes=changes, layers=edited_layers,
+                   message=explanation if changes else "No changes needed."), 200
 
 
 @app.errorhandler(413)

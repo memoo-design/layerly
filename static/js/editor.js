@@ -267,12 +267,20 @@
     $('commandMode').textContent = state.demo ? 'DEMO MODE · Local rule parser, no AI service' : 'Flask AI backend · Text layers only';
   }
   function currentLayers() {
-    return state.canvas.getObjects().map(o => ({ id: o.layerId, text: o.text,
-      x: o.left, y: o.top, width: o.width, height: o.height, rotation: o.angle,
-      scale_x: o.scaleX, scale_y: o.scaleY, font_size: o.fontSize, font_family: o.fontFamily,
-      color: o.fill, font_weight: o.fontWeight, font_style: o.fontStyle,
-      text_align: o.textAlign, visible: o.visible }));
+    return state.canvas.getObjects().map(o => {
+      if (o.confidence != null && (typeof o.confidence !== 'number' || !Number.isFinite(o.confidence) || o.confidence < 0 || o.confidence > 1)) {
+        throw new Error('OCR confidence must be a finite number between 0 and 1, or absent.');
+      }
+      const bounds = o.getBoundingRect(true, true);
+      return { id: o.layerId, text: o.text, confidence: o.confidence ?? null,
+        x: o.left, y: o.top, width: o.width, height: o.height, rotation: o.angle,
+        scale_x: o.scaleX, scale_y: o.scaleY, font_size: o.fontSize, font_family: o.fontFamily,
+        color: o.fill, font_weight: o.fontWeight, font_style: o.fontStyle,
+        text_align: o.textAlign, visible: o.visible,
+        bounds: { left: bounds.left, width: bounds.width } };
+    });
   }
+
   async function requestTextEdit(payload, signal) {
     let response;
     try { response = await fetch('/api/edit-text', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(payload), signal }); }
@@ -313,7 +321,7 @@
     return { changes: targets.map(id => ({ id, properties })), message: 'Demo command applied.' };
   }
   function validateTextChanges(data, targets) {
-    if (!data || !Array.isArray(data.changes) || !data.changes.length || data.changes.length > 500) throw new Error('The backend must return a nonempty changes array.');
+    if (!data || !Array.isArray(data.changes) || data.changes.length > 500) throw new Error('The backend must return a changes array.');
     const ids = new Set();
     const names = { text: 'text', color: 'fill', font_size: 'fontSize', font_family: 'fontFamily', font_weight: 'fontWeight', font_style: 'fontStyle', text_align: 'textAlign', x: 'left', y: 'top', rotation: 'angle', visible: 'visible' };
     return data.changes.map(change => {
@@ -340,6 +348,13 @@
         if (key !== 'position') update[names[key]] = value;
       }
       if (Object.hasOwn(update, 'text')) update.styles = {};
+      else if (['fill', 'fontSize', 'fontFamily', 'fontWeight', 'fontStyle'].some(key => Object.hasOwn(update, key))) {
+        // Character-level styles must not override the requested layer-wide style.
+        update.styles = JSON.parse(JSON.stringify(object.styles || {}));
+        Object.values(update.styles).forEach(line => Object.values(line).forEach(style => {
+          Object.keys(update).forEach(key => { if (key !== 'styles') delete style[key]; });
+        }));
+      }
       if (props.position && ['x', 'y'].some(key => Object.hasOwn(props, key))) throw new Error('Return center positioning or x/y, not both.');
       return { object, update, center: props.position === 'center' };
     });
@@ -351,9 +366,13 @@
     if (!prompt) { commandMessage('Enter a text editing instruction.', 'error'); return; }
     if (active()?.isEditing) active().exitEditing();
     if (state.textTimer) commit();
-    const layers = currentLayers(), selectedId = active()?.layerId || null;
-    let targets;
-    try { targets = commandScope(prompt, selectedId, layers); }
+    const selectedId = active()?.layerId || null;
+    let layers, targets;
+    try {
+      layers = currentLayers();
+      // The server resolves normal-project targets once, using the submitted snapshot.
+      targets = state.demo ? commandScope(prompt, selectedId, layers) : layers.map(layer => layer.id);
+    }
     catch (error) { commandMessage(error.message, 'error'); return; }
     const before = snapshot(), projectId = state.projectId;
     state.commandBusy = true; $('applyCommand').disabled = true; $('commandForm').setAttribute('aria-busy', 'true');
@@ -362,7 +381,7 @@
     try {
       const payload = { project_id: projectId, prompt, selected_layer_id: selectedId, width: state.width, height: state.height, layers };
       const result = state.demo ? demoTextEdit(payload, targets) : await requestTextEdit(payload, controller.signal);
-      if (projectId !== state.projectId || snapshot() !== before || state.restoring) throw new Error('The poster changed while the command was processing. Submit the command again.');
+      if (projectId !== state.projectId || snapshot() !== before || (active()?.layerId || null) !== selectedId || state.restoring) throw new Error('The poster changed while the command was processing. Submit the command again.');
       const changes = validateTextChanges(result, targets);
       // Validate the complete response before touching any layer. Background is never changed.
       changes.forEach(({ object, update, center }) => {
@@ -375,7 +394,7 @@
         object.setCoords();
       });
       state.canvas.requestRenderAll(); commit(); sync();
-      commandMessage(`${state.demo ? 'Demo: ' : ''}Updated ${changes.length} text layer${changes.length === 1 ? '' : 's'}.`, 'success');
+      commandMessage(changes.length ? `${state.demo ? 'Demo: ' : ''}Updated ${changes.length} text layer${changes.length === 1 ? '' : 's'}.` : 'No changes needed.', 'success');
     } catch (error) { commandMessage(error.name === 'AbortError' ? 'AI text editing timed out. No changes applied.' : error.message, 'error'); }
     finally { clearTimeout(timeout); state.commandBusy = false; $('applyCommand').disabled = false; $('commandForm').setAttribute('aria-busy', 'false'); }
   }

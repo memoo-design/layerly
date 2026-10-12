@@ -2,12 +2,14 @@
 import math
 import re
 import uuid
+import copy
+from numbers import Real
 
 
 def _number(value):
     """Return True for finite numbers, excluding booleans."""
     return (
-        isinstance(value, (int, float))
+        isinstance(value, Real)
         and not isinstance(value, bool)
         and math.isfinite(value)
     )
@@ -128,7 +130,7 @@ def ocr_results_to_layers(ocr_lines, image_width, image_height):
     return layers
 
 
-def validate_layers(layers):
+def validate_layers(layers, require_confidence=True):
     """Validate layers against the frontend's expected fields."""
     if not isinstance(layers, list):
         return False, "Layers must be a list."
@@ -136,7 +138,7 @@ def validate_layers(layers):
     seen_ids = set()
     required_numbers = (
         "x", "y", "width", "height",
-        "rotation", "font_size", "confidence",
+        "rotation", "font_size",
     )
 
     for layer in layers:
@@ -164,8 +166,22 @@ def validate_layers(layers):
         if not 0 < layer["font_size"] <= 2000:
             return False, "Font size must be between 1 and 2000."
 
-        if not 0 <= layer["confidence"] <= 1:
-            return False, "Confidence must be between 0 and 1."
+        confidence = layer.get("confidence")
+        if confidence is not None or require_confidence:
+            if not _number(confidence):
+                return False, "Confidence must be a finite number between 0 and 1, or omitted during editing."
+            if not 0 <= confidence <= 1:
+                return False, "Confidence must be between 0 and 1."
+        for key in ("scale_x", "scale_y"):
+            if key in layer and (not _number(layer[key]) or layer[key] <= 0):
+                return False, f"{key} must be a positive finite number."
+        if "bounds" in layer:
+            bounds = layer["bounds"]
+            if (not isinstance(bounds, dict) or not _number(bounds.get("left"))
+                    or not _number(bounds.get("width")) or bounds["width"] <= 0):
+                return False, "Layer bounds must contain finite left and positive width values."
+        if len(layer["text"]) > 10000:
+            return False, "Layer text cannot exceed 10,000 characters."
 
         if not isinstance(layer.get("font_family"), str) or not layer["font_family"].strip():
             return False, "Font family is required."
@@ -174,3 +190,24 @@ def validate_layers(layers):
             return False, "Color must be a six-digit hex value."
 
     return True, "All layers are valid."
+
+def normalize_edit_layers(layers):
+    """Copy edit snapshots; OCR confidence is optional, never fabricated."""
+    valid, message = validate_layers(layers, require_confidence=False)
+    if not valid:
+        raise ValueError(message)
+    if len(layers) > 500:
+        raise ValueError("At most 500 text layers can be edited at once.")
+
+    def native(value):
+        if isinstance(value, Real) and not isinstance(value, bool):
+            if not math.isfinite(value):
+                raise ValueError("Layer metadata must not contain NaN or infinity.")
+            return value if isinstance(value, (int, float)) else float(value)
+        if isinstance(value, dict):
+            return {key: native(item) for key, item in value.items()}
+        if isinstance(value, list):
+            return [native(item) for item in value]
+        return value
+
+    return native(copy.deepcopy(layers))
