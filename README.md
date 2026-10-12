@@ -198,3 +198,5 @@ Model downloads need internet on first use and write to Paddle's user cache. Run
 Typography, color, and font size are estimates. Polygon inpainting works best on plain backgrounds and can blur photographs, gradients, or graphics behind text. Undetected or confidence-filtered text remains flattened in the background. Large images consume substantial CPU and memory. Uploads and processed files remain on disk until manually removed; this local editor has no retention scheduler.
 
 `test_extraction.py` uses mocked OCR predictions with real Pillow/OpenCV image processing. Existing edit API and layer utility checks also run through unittest discovery. Browser editing/export and real model inference require separate smoke checks; unit tests do not prove either.
+
+API reference: [PaddleOCR 3.x OCR pipeline documentation](https://paddlepaddle.github.io/PaddleOCR/main/en/version3.x/pipeline_usage/OCR.html). Constructor and result fields were also checked against the downloaded 3.7.0 / PaddleX 3.7.2 package sources.

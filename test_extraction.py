@@ -74,6 +74,12 @@ class ExtractionTests(unittest.TestCase):
             self.assertEqual(normalize_results(predictions(text, score), 100, 60), [])
         with self.assertRaises(ValueError):
             normalize_results([{'dt_polys': []}], 100, 60)
+        result = predictions()
+        result[0]['rec_polys'] = [[[float('nan'), 0], [2, 0], [2, 2], [0, 2]]]
+        self.assertEqual(normalize_results(result, 100, 60), [])
+        result[0]['rec_polys'] = [[[-2, -2], [120, 0], [120, 80], [0, 80]]]
+        layers = ocr_results_to_layers(normalize_results(result, 100, 60), 100, 60)
+        self.assertTrue(validate_layers(layers)[0])
 
     def test_empty(self):
         with patch.object(backend.ocr_service, 'extract', return_value=[]):
