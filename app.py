@@ -1,19 +1,27 @@
 
 from pathlib import Path
 import uuid
+import os
+from io import BytesIO
+
+import numpy as np
 
 from flask import Flask, jsonify, render_template, request, url_for
-from PIL import Image, UnidentifiedImageError
+from PIL import Image, ImageOps, UnidentifiedImageError
 
-from layer_utils import ocr_results_to_layers, validate_layers
+from layer_utils import validate_layers, ocr_results_to_layers
 from ai_edit_service import apply_command, CommandError
-from ocr_service import extract_and_clean
+from ocr_service import ocr_service, OCRUnavailable, OCRProcessingError
+from background_service import repair_background, estimate_colors
 
 
 app = Flask(__name__)
 
 # Maximum upload size: 20 MB plus a small allowance.
 app.config["MAX_CONTENT_LENGTH"] = 20 * 1024 * 1024 + 64 * 1024
+
+app.config["OCR_CONFIDENCE_THRESHOLD"] = float(os.getenv("OCR_CONFIDENCE_THRESHOLD", "0.5"))
+PROCESSED_DIR = Path(app.static_folder) / "processed"
 
 UPLOAD_DIR = Path(app.static_folder) / "uploads"
 
@@ -35,90 +43,58 @@ def index():
 
 @app.post("/api/extract-text")
 def extract_text():
-    """Validate a poster, extract OCR layers, and repair its background."""
-
+    """Validate, recognize, remove text, and return editable layers."""
     uploaded_file = request.files.get("image")
-
     if uploaded_file is None or not uploaded_file.filename:
-        return jsonify(
-            error="Please upload a poster image."
-        ), 400
-
+        return jsonify(error="Please upload a poster image."), 400
+    payload = uploaded_file.stream.read(20 * 1024 * 1024 + 1)
+    if len(payload) > 20 * 1024 * 1024:
+        return jsonify(error="The uploaded image exceeds the 20 MB limit."), 413
     try:
-        # Inspect the uploaded image.
-        with Image.open(uploaded_file.stream) as image:
+        with Image.open(BytesIO(payload)) as image:
             image_format = image.format
             width, height = image.size
+            if image_format not in ALLOWED_FORMATS:
+                return jsonify(error="Unsupported image format. Use JPEG, PNG, or WEBP."), 400
+            if max(width, height) > MAX_IMAGE_SIDE or width * height > MAX_IMAGE_PIXELS:
+                return jsonify(error="Use an image up to 12,000 pixels per side and 50 megapixels."), 400
             image.verify()
+        with Image.open(BytesIO(payload)) as image:
+            image = ImageOps.exif_transpose(image)
+            # Composite transparent posters onto white, matching the editor canvas.
+            rgba = image.convert("RGBA")
+            base = Image.new("RGBA", rgba.size, "white")
+            base.alpha_composite(rgba)
+            rgb = np.array(base.convert("RGB"))
+            width, height = base.size
+    except (UnidentifiedImageError, OSError, ValueError, Image.DecompressionBombError):
+        return jsonify(error="The uploaded file is not a valid, readable image."), 400
 
-        # Check the actual image format.
-        if image_format not in ALLOWED_FORMATS:
-            return jsonify(
-                error="Unsupported image format. Use JPEG, PNG, or WEBP."
-            ), 400
-
-        # Check image dimensions.
-        if width > MAX_IMAGE_SIDE or height > MAX_IMAGE_SIDE:
-            return jsonify(
-                error="Image dimensions cannot exceed 12,000 pixels per side."
-            ), 400
-
-        if width * height > MAX_IMAGE_PIXELS:
-            return jsonify(
-                error="Image cannot exceed 50 megapixels."
-            ), 400
-
-        # Create the upload folder if it does not exist.
-        UPLOAD_DIR.mkdir(parents=True, exist_ok=True)
-
-        # Generate a unique filename.
-        filename = f"{uuid.uuid4().hex}{ALLOWED_FORMATS[image_format]}"
-        destination = UPLOAD_DIR / filename
-
-        # Save the uploaded image.
-        uploaded_file.stream.seek(0)
-        uploaded_file.save(destination)
-
-    except (
-        UnidentifiedImageError,
-        OSError,
-        Image.DecompressionBombError,
-    ):
-        return jsonify(
-            error="The uploaded file is not a valid, readable image."
-        ), 400
-
-    # Generate an ID for this upload.
     project_id = uuid.uuid4().hex
-
-    cleaned_filename = f"{project_id}_cleaned.png"
-    cleaned_path = UPLOAD_DIR / cleaned_filename
     try:
-        ocr_lines = extract_and_clean(destination, cleaned_path)
-        layers = ocr_results_to_layers(ocr_lines, width, height)
+        original_dir = UPLOAD_DIR / project_id
+        original_dir.mkdir(parents=True, exist_ok=True)
+        (original_dir / ("original" + ALLOWED_FORMATS[image_format])).write_bytes(payload)
+        lines = ocr_service.extract(rgb[:, :, ::-1].copy(), app.config["OCR_CONFIDENCE_THRESHOLD"])
+        if len(lines) > 500:
+            return jsonify(error="More than 500 text regions were detected. Please crop the poster and retry."), 422
+        estimate_colors(rgb, lines)
+        layers = ocr_results_to_layers(lines, width, height)
+        destination = PROCESSED_DIR / project_id / "cleaned.png"
+        repair_background(rgb, lines, destination)
+    except OCRUnavailable as exc:
+        app.logger.exception("OCR initialization failed")
+        return jsonify(error=str(exc)), 503
+    except OCRProcessingError as exc:
+        app.logger.exception("OCR inference failed")
+        return jsonify(error=str(exc)), 500
     except Exception:
-        app.logger.exception("Poster OCR/background repair failed")
-        return jsonify(error="Text extraction failed. Check the Flask server logs."), 500
-
-    background_url = url_for(
-        "static", filename=f"uploads/{cleaned_filename}", _external=True
-    )
-    warnings = []
-    if not layers:
-        warnings.append("No text was detected in this poster.")
-    else:
-        warnings.append(
-            "Text removal is approximate; review the repaired background and typography."
-        )
-
-    return jsonify(
-        project_id=project_id,
-        width=width,
-        height=height,
-        background_url=background_url,
-        layers=layers,
-        warnings=warnings,
-    ), 200
+        app.logger.exception("Poster processing failed")
+        return jsonify(error="Poster processing or background repair failed. See the server log for details."), 500
+    return jsonify(project_id=project_id, width=width, height=height,
+        background_url=url_for("static", filename=f"processed/{project_id}/cleaned.png"),
+        layers=layers, warnings=[] if layers else [
+            "No text met the OCR confidence threshold. You can add your own text."])
 
 
 @app.post("/api/edit-text")

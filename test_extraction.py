@@ -161,6 +161,7 @@ class ExtractionTests(unittest.TestCase):
                 service.extract(np.zeros((60, 100, 3), np.uint8))
         constructor.assert_called_once()
         self.assertEqual(constructor.call_args.kwargs['device'], 'cpu')
+        self.assertFalse(constructor.call_args.kwargs['enable_mkldnn'])
         self.assertFalse(constructor.call_args.kwargs['use_doc_unwarping'])
 
     def test_home_unchanged(self):

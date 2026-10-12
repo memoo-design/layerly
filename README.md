@@ -115,7 +115,7 @@ For errors return non-2xx status and `{"error":"Human-readable explanation"}`. R
 
 The bottom panel follows the supplied sample's AI panel, prompt box, purple Apply button and suggestion chips. Its selection indicator shows the current layer's text and ID. Enter submits; Shift+Enter adds a newline. Processing, success and error messages appear below the prompt. Commands record one undo step and refresh the properties panel. They change Fabric text properties without replacing or regenerating the background.
 
-Normal projects call `window.LayerlyAPI.requestTextEdit(payload, signal)` at `POST /api/edit-text`. The supplied Flask route honestly returns HTTP 501 until you implement the interpreter. Keep AI credentials and model calls on the server. Validate target IDs, allowed properties and values on the server as well as the client. Never execute model-generated code.
+Normal projects call `window.LayerlyAPI.requestTextEdit(payload, signal)` at `POST /api/edit-text`. A concurrent change added an offline command interpreter in `ai_edit_service.py`; that route was preserved during the OCR work. Its command behavior is outside this extraction task. Keep AI credentials and model calls on the server. Validate target IDs, allowed properties and values on the server as well as the client. Never execute model-generated code.
 
 Example request:
 
@@ -200,3 +200,12 @@ Typography, color, and font size are estimates. Polygon inpainting works best on
 `test_extraction.py` uses mocked OCR predictions with real Pillow/OpenCV image processing. Existing edit API and layer utility checks also run through unittest discovery. Browser editing/export and real model inference require separate smoke checks; unit tests do not prove either.
 
 API reference: [PaddleOCR 3.x OCR pipeline documentation](https://paddlepaddle.github.io/PaddleOCR/main/en/version3.x/pipeline_usage/OCR.html). Constructor and result fields were also checked against the downloaded 3.7.0 / PaddleX 3.7.2 package sources.
+
+If the default model host stalls on first setup, set `$env:PADDLE_PDX_MODEL_SOURCE = "bos"` in PowerShell before starting Flask to use Paddle's alternative official download host. Cached weights are reused.
+
+
+## Verified in this workspace
+
+Python 3.10.11, PaddleOCR 3.7.0, PaddlePaddle 3.3.1, PaddleX 3.7.2, NumPy 2.2.6, OpenCV 4.10.0 and Pillow 12.3.0 were installed and checked. `pip check` passes. Windows inference required disabling optional oneDNN/MKLDNN acceleration (`enable_mkldnn=False`), which is set in the service.
+
+All 12 extraction tests pass, together with existing layer and edit API validation checks. JavaScript syntax validation passes. A real CPU Flask extraction of an 800x300 synthetic poster recognized ?SUMMER SALE? with confidence 0.999628 and produced a separate, entirely white repaired PNG with the original black lettering removed. Browser selection, editing, and PNG export were not exercised in an automated browser; use the manual checklist above. The concurrent command-bar implementation was preserved; its old no-selection test now expects HTTP 422 instead of the former placeholder 501.

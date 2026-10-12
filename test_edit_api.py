@@ -20,7 +20,7 @@ response = client.post(
 print("Empty prompt:", response.status_code)
 assert response.status_code == 400
 
-# Test 3: Valid request, but AI is not connected
+# Test 3: The command route rejects a request without a text target
 response = client.post(
     "/api/edit-text",
     json={
@@ -32,6 +32,7 @@ response = client.post(
 )
 print("Valid request:", response.status_code)
 print("Response:", response.get_json())
-assert response.status_code == 501
+assert response.status_code == 422
+assert "Select a text layer" in response.get_json()["error"]
 
 print("All API validation tests passed!")

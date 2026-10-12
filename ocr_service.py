@@ -80,7 +80,9 @@ class OCRService:
                     major = int(version('paddleocr').split('.')[0])
                     self._modern = major == 3
                     if major == 3:
-                        self._model = PaddleOCR(device='cpu', lang=os.getenv('OCR_LANG', 'en'),
+                        # Paddle 3.3.1's Windows oneDNN PIR path fails on these models.
+                        self._model = PaddleOCR(device='cpu', enable_mkldnn=False,
+                            lang=os.getenv('OCR_LANG', 'en'),
                             ocr_version='PP-OCRv5',
                             use_doc_orientation_classify=False, use_doc_unwarping=False,
                             use_textline_orientation=False)
