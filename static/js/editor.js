@@ -384,15 +384,23 @@
       if (projectId !== state.projectId || snapshot() !== before || (active()?.layerId || null) !== selectedId || state.restoring) throw new Error('The poster changed while the command was processing. Submit the command again.');
       const changes = validateTextChanges(result, targets);
       // Validate the complete response before touching any layer. Background is never changed.
-      changes.forEach(({ object, update, center }) => {
-        object.set(update);
-        if (center) {
-          const box = object.getBoundingRect(true, true);
-          object.set({ left: object.left + state.width / 2 - box.left - box.width / 2,
-            top: object.top + state.height / 2 - box.top - box.height / 2 });
-        }
-        object.setCoords();
-      });
+      const backups = changes.map(({ object, update }) => ({ object,
+        values: Object.fromEntries([...new Set([...Object.keys(update), 'left', 'top', 'width', 'height'])].map(key => [key, object.get(key)])) }));
+      try {
+        changes.forEach(({ object, update, center }) => {
+          object.set(update);
+          if (center) {
+            const box = object.getBoundingRect(true, true);
+            object.set({ left: object.left + state.width / 2 - box.left - box.width / 2,
+              top: object.top + state.height / 2 - box.top - box.height / 2 });
+          }
+          object.setCoords();
+        });
+      } catch (error) {
+        backups.forEach(({ object, values }) => { object.set(values); object.setCoords(); });
+        state.canvas.requestRenderAll();
+        throw new Error('The text update could not be applied. No changes applied.');
+      }
       state.canvas.requestRenderAll(); commit(); sync();
       commandMessage(changes.length ? `${state.demo ? 'Demo: ' : ''}Updated ${changes.length} text layer${changes.length === 1 ? '' : 's'}.` : 'No changes needed.', 'success');
     } catch (error) { commandMessage(error.name === 'AbortError' ? 'AI text editing timed out. No changes applied.' : error.message, 'error'); }

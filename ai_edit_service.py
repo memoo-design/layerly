@@ -49,7 +49,7 @@ def _target(layers, selected_id, subject):
 
 def _unquote(text):
     text = text.strip()
-    if len(text) >= 2 and (text[0], text[-1]) in [('"', '"'), ("'", "'"), ('?', '?')]:
+    if len(text) >= 2 and (text[0], text[-1]) in [('"', '"'), ("'", "'"), ('\u201c', '\u201d')]:
         return text[1:-1]
     return text
 
@@ -100,7 +100,7 @@ def apply_command(prompt, layers, selected_layer_id=None, canvas_width=None):
             match = re.fullmatch(rf'(?:make\s+)?({SUBJECT})\s+(bigger|larger|smaller)', p, re.I)
             increase = re.fullmatch(rf'(increase|decrease)\s+(?:the\s+)?(?:font\s+)?size\s+of\s+({SUBJECT})', p, re.I)
             size = re.fullmatch(rf'(?:set|change|increase)\s+({SUBJECT})\s+(?:font\s+)?size\s+(?:to\s+)?(\d+(?:\.\d+)?)', p, re.I)
-            rotation = re.fullmatch(rf'rotate\s+({SUBJECT})\s+(?:by\s+|to\s+)?(-?\d+(?:\.\d+)?)(?:\s*(?:degrees?|?))?', p, re.I)
+            rotation = re.fullmatch(rf'rotate\s+({SUBJECT})\s+(?:by\s+|to\s+)?(-?\d+(?:\.\d+)?)(?:\s*(?:degrees?|\u00b0))?', p, re.I)
             center = re.fullmatch(rf'(?:center|centre)\s+({SUBJECT})(?:\s+horizontally)?|move\s+({SUBJECT})\s+to\s+(?:the\s+)?cent(?:er|re)', p, re.I)
             align = re.fullmatch(rf'align\s+({SUBJECT})\s+(left|right|center|centre)', p, re.I)
             if match or increase:

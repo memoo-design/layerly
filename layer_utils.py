@@ -3,7 +3,7 @@ import math
 import re
 import uuid
 import copy
-from numbers import Real
+from numbers import Real, Integral
 
 
 def _number(value):
@@ -203,7 +203,7 @@ def normalize_edit_layers(layers):
         if isinstance(value, Real) and not isinstance(value, bool):
             if not math.isfinite(value):
                 raise ValueError("Layer metadata must not contain NaN or infinity.")
-            return value if isinstance(value, (int, float)) else float(value)
+            return int(value) if isinstance(value, Integral) else float(value)
         if isinstance(value, dict):
             return {key: native(item) for key, item in value.items()}
         if isinstance(value, list):
