@@ -81,6 +81,7 @@ class OCRService:
                     self._modern = major == 3
                     if major == 3:
                         self._model = PaddleOCR(device='cpu', lang=os.getenv('OCR_LANG', 'en'),
+                            ocr_version='PP-OCRv5',
                             use_doc_orientation_classify=False, use_doc_unwarping=False,
                             use_textline_orientation=False)
                     elif major == 2:
@@ -91,7 +92,7 @@ class OCRService:
                 except Exception as exc:
                     raise OCRUnavailable('PaddleOCR could not initialize. Check the installed CPU runtime and model downloads in the server log.') from exc
             try:
-                results = (self._model.predict(bgr) if self._modern
+                results = (self._model.predict(bgr, text_rec_score_thresh=threshold) if self._modern
                            else self._model.ocr(bgr, cls=True))
                 return normalize_results(results, bgr.shape[1], bgr.shape[0], threshold, self._modern)
             except Exception as exc:

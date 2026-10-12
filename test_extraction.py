@@ -1,4 +1,5 @@
 import io
+import sys
 import tempfile
 import unittest
 from pathlib import Path
@@ -81,6 +82,28 @@ class ExtractionTests(unittest.TestCase):
         self.assertTrue(data['warnings'])
         self.assertTrue((self.root / 'processed' / data['project_id'] / 'cleaned.png').exists())
 
+    def test_exif_orientation(self):
+        stream = io.BytesIO()
+        image = Image.new('RGB', (100, 60), 'white')
+        exif = image.getexif()
+        exif[274] = 6
+        image.save(stream, 'JPEG', exif=exif)
+        stream.seek(0)
+        with patch.object(backend.ocr_service, 'extract', return_value=[]) as extract:
+            response = self.client.post('/api/extract-text', data={'image': (stream, 'rotated.jpg')})
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(extract.call_args.args[0].shape, (100, 60, 3))
+        self.assertEqual((response.json['width'], response.json['height']), (60, 100))
+
+    def test_transparency(self):
+        stream = io.BytesIO()
+        Image.new('RGBA', (100, 60), (0, 0, 0, 0)).save(stream, 'PNG')
+        stream.seek(0)
+        with patch.object(backend.ocr_service, 'extract', return_value=[]) as extract:
+            response = self.client.post('/api/extract-text', data={'image': (stream, 'transparent.png')})
+        self.assertEqual(response.status_code, 200)
+        self.assertTrue((extract.call_args.args[0] == 255).all())
+
     def test_invalid(self):
         self.assertEqual(self.client.post('/api/extract-text').status_code, 400)
         response = self.client.post('/api/extract-text', data={'image': (io.BytesIO(b'broken'), 'a.png')})
@@ -121,6 +144,18 @@ class ExtractionTests(unittest.TestCase):
         service._model.predict.side_effect = RuntimeError('inference')
         with self.assertRaises(OCRProcessingError):
             service.extract(np.zeros((60, 100, 3), np.uint8))
+
+    def test_lazy_initialization_once(self):
+        service = OCRService()
+        constructor = Mock()
+        constructor.return_value.predict.return_value = predictions()
+        with patch.dict(sys.modules, {'paddleocr': Mock(PaddleOCR=constructor)}), \
+             patch('ocr_service.version', return_value='3.7.0'):
+            for _ in range(2):
+                service.extract(np.zeros((60, 100, 3), np.uint8))
+        constructor.assert_called_once()
+        self.assertEqual(constructor.call_args.kwargs['device'], 'cpu')
+        self.assertFalse(constructor.call_args.kwargs['use_doc_unwarping'])
 
     def test_home_unchanged(self):
         self.assertEqual(self.client.get('/').status_code, 200)

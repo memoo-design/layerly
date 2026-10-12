@@ -42,7 +42,7 @@ Open http://127.0.0.1:5000. The Flask development server binds to localhost. The
 
 ## Dependencies
 
-- Flask 3.1.2, pinned in requirements.txt.
+- Flask 3.1.2, PaddleOCR 3.7.0, PaddlePaddle CPU 3.3.1, OpenCV contrib 4.10.0.84, Pillow and NumPy in requirements.txt. OpenCV matches the PaddleX OCR dependency to avoid conflicting cv2 wheels.
 - Bootstrap CSS 5.3.3 from jsDelivr, imported in the template. Uses responsive form controls; the sample's custom responsive grids preserve its layout. Bootstrap JavaScript is unnecessary here.
 - Fabric.js 5.3.0 from cdnjs, imported before editor.js with ordered deferred scripts.
 - Google Fonts: DM Sans 400/500/600/700 and Manrope 500/600/700/800, imported in style.css as in the supplied design. Font service revisions are not pinned; local system fonts are available as fallbacks. For exact font reproducibility, self-host licensed font files and change the CSS import to @font-face.
@@ -173,7 +173,7 @@ Additional manual checks:
 
 ## Local OCR and background repair
 
-The service lazily initializes one CPU PaddleOCR model per server process, serializes inference, and reads 3.x `rec_texts`, `rec_scores`, and `rec_polys`. A compatibility adapter also supports existing 2.x installations, though requirements select 3.7.0 with PaddlePaddle 3.3.1. Document rotation/unwarping are disabled to preserve poster coordinates. Rotated quadrilaterals become angled text boxes; perspective and curved text are approximate.
+The service lazily initializes one CPU PP-OCRv5 model per server process, serializes inference, and reads 3.x `rec_texts`, `rec_scores`, and `rec_polys`. A compatibility adapter also supports existing 2.x installations, though requirements select 3.7.0 with PaddlePaddle 3.3.1. Document rotation/unwarping are disabled to preserve poster coordinates. Rotated quadrilaterals become angled text boxes; perspective and curved text are approximate.
 
 Original uploaded bytes are retained at `static/uploads/<project_id>/original.<ext>`. EXIF orientation is applied before inference. Transparent pixels are composited onto white. Recognition polygons are expanded by two pixels and repaired with OpenCV Telea inpainting (radius 3), saved to `static/processed/<project_id>/cleaned.png`. Only accepted recognition regions are erased. Empty recognition returns a separately saved background and an informational warning.
 
