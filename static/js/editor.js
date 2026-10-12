@@ -90,7 +90,7 @@
     if (!state.file || state.busy) return;
     state.request = new AbortController(); state.busy = true;
     $('processingPreview').src = state.originalUrl; screen('processing');
-    const timeout = setTimeout(() => state.request?.abort('timeout'), 90000);
+    const timeout = setTimeout(() => state.request?.abort('timeout'), 300000);
     try {
       const data = validateResponse(await requestTextExtraction(state.file, state.request.signal));
       const original = await imageFrom(state.originalUrl);
@@ -100,7 +100,7 @@
     } catch (err) {
       const reason = state.request?.signal.reason;
       state.busy = false; screen('upload');
-      message(err.name === 'AbortError' ? (reason === 'timeout' ? 'The backend did not finish within 90 seconds. Your original preview is retained; try again.' : 'Extraction cancelled. Your original preview is retained.') : err.message);
+      message(err.name === 'AbortError' ? (reason === 'timeout' ? 'The backend did not finish within 5 minutes. Your original preview is retained; try again.' : 'Extraction cancelled. Your original preview is retained.') : err.message);
     } finally { clearTimeout(timeout); state.request = null; state.busy = false; }
   };
   $('cancel').onclick = () => state.request?.abort('cancel');
@@ -146,6 +146,7 @@
         fill: layer.color, fontWeight: layer.font_weight || 'normal', fontStyle: layer.font_style || 'normal',
         textAlign: layer.text_align || 'left', splitByGrapheme: false });
       // Fabric computes text height from font metrics. Preserve the backend box height.
+      object.scaleX = layer.width / Math.max(1, object.width);
       object.scaleY = layer.height / Math.max(1, object.height); object.setCoords(); c.add(object);
     });
     state.restoring = false; state.history = []; state.index = -1; commit();
@@ -157,7 +158,7 @@
     $('warnings').replaceChildren();
     const warnings = [...(data.warnings || []), ...fontWarnings];
     if (data.layers.length) warnings.push('Text appearance is approximate: font metrics and detected box heights may differ from the original. Review before export.');
-    if (!data.layers.length) warnings.push('No text layers were detected. You can add your own text.');
+    if (!data.layers.length && !warnings.length) warnings.push('No text layers were detected. You can add your own text.');
     warnings.forEach(text => { const p = document.createElement('p'); p.textContent = text; $('warnings').append(p); });
     if (c.getObjects().length) c.setActiveObject(c.getObjects()[0]); sync();
   }

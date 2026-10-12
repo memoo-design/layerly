@@ -13,7 +13,7 @@ A runnable HTML/CSS/vanilla JavaScript frontend adapted from the supplied Layerl
 
 ## Install and run
 
-Use Python 3.10 or newer. From this folder:
+Use Python 3.10 (64-bit) with the CPU PaddlePaddle runtime. From this folder:
 
 ```bash
 python -m venv .venv
@@ -38,7 +38,7 @@ python -m pip install -r requirements.txt
 python app.py
 ```
 
-Open http://127.0.0.1:5000. The Flask development server binds to localhost. The normal Extract Text flow calls the backend and currently shows its explicit HTTP 501 not-implemented error. The separate labelled demo uses a synthetic background and preset text without analysing uploads.
+Open http://127.0.0.1:5000. The Flask development server binds to localhost. The normal Extract Text flow runs local PaddleOCR and OpenCV background repair. The first extraction downloads model weights and can take several minutes; subsequent requests reuse the model. The separate labelled demo uses a synthetic background and preset text without analysing uploads.
 
 ## Dependencies
 
@@ -51,7 +51,7 @@ The CDN dependencies require internet. For offline use, download these exact ver
 
 ## Backend contract
 
-Replace only `extract_text()` in app.py with your real pipeline. The frontend transport is the separate `requestTextExtraction(file, signal)` function in editor.js, also exposed as `window.LayerlyAPI.requestTextExtraction`. It sends `POST /api/extract-text` with multipart FormData field `image`. Do not manually set Content-Type: the browser supplies the boundary.
+The pipeline is implemented in `ocr_service.py`, `background_service.py`, and `app.py`. The frontend transport is the separate `requestTextExtraction(file, signal)` function in editor.js, also exposed as `window.LayerlyAPI.requestTextExtraction`. It sends `POST /api/extract-text` with multipart FormData field `image`. Do not manually set Content-Type: the browser supplies the boundary.
 
 Return HTTP 200 with JSON like this:
 
@@ -86,7 +86,7 @@ The background MUST have the detected text removed and its missing areas repaire
 
 If background_url is absent, the app returns to the original-image preview with a full-reconstruction-not-ready explanation. It does not overlay detected text on the original. A broken background URL, invalid JSON, mismatched dimensions, HTTP errors, unavailable service and timeouts also produce visible errors. Backend warnings appear in the editor. An empty layers array is allowed if a valid cleaned background exists.
 
-For errors return non-2xx status and `{"error":"Human-readable explanation"}`. Reconstruction requests time out after 90 seconds and can be cancelled; cancellation aborts the browser request but may not stop server-side processing.
+For errors return non-2xx status and `{"error":"Human-readable explanation"}`. Reconstruction requests time out after 5 minutes and can be cancelled; cancellation aborts the browser request but may not stop server-side processing.
 
 ## Editor behavior
 
@@ -103,8 +103,8 @@ For errors return non-2xx status and `{"error":"Human-readable explanation"}`. R
 ## Manual checklist
 
 1. Run Flask. Upload PNG and JPEG through both the chooser and drag-and-drop. Check the original preview, filename and dimensions. Reject nonimages and files over 20 MB.
-2. Click Extract Text with the provided server. Confirm the explicit not-implemented message and retained original preview. The request must include the `image` field.
-3. Connect the real API. Return a repaired background plus text. Check that only the cleaned background appears under editable text. Try missing/broken background_url, wrong dimensions, invalid JSON, a server error and slow/cancelled requests. No case should show duplicated original text.
+2. Click Extract Text. Confirm recognized text is editable over the repaired background. The request must include the `image` field.
+3. Check the API returns a repaired background plus text. Check that only the cleaned background appears under editable text. Try missing/broken background_url, wrong dimensions, invalid JSON, a server error and slow/cancelled requests. No case should show duplicated original text.
 4. Open the labelled demo for frontend-only checks. Confirm its demo banner. Select a layer from the canvas and the panel. Double-click text and edit it; also use the Content property.
 5. Change font, size, color, left/center/right alignment and bold/italic. Drag text, resize with corners and sides, rotate, and adjust numeric x/y/width/height/rotation. Confirm selection and properties stay synchronized.
 6. Add a layer. Hide it, show it and delete it. Undo/redo each action, including text, style, resize, movement and rotation. After undo, make a new change and verify the old redo branch is discarded.
@@ -169,3 +169,32 @@ Additional manual checks:
 4. In a normal reconstructed project, confirm `/api/edit-text` receives JSON with prompt, selected ID, dimensions and current layers. With the supplied route, confirm an unavailable message and unchanged canvas.
 5. Mock a valid response, then unknown IDs, duplicate IDs, extra layer targets, invalid colors/sizes and unsupported properties. Invalid responses must apply no partial edits.
 6. Simulate a slow request. Check Processing, disabled Apply, timeout, and rejection if the poster was edited while waiting. Export after a command at different zooms and confirm original dimensions.
+
+
+## Local OCR and background repair
+
+The service lazily initializes one CPU PaddleOCR model per server process, serializes inference, and reads 3.x `rec_texts`, `rec_scores`, and `rec_polys`. A compatibility adapter also supports existing 2.x installations, though requirements select 3.7.0 with PaddlePaddle 3.3.1. Document rotation/unwarping are disabled to preserve poster coordinates. Rotated quadrilaterals become angled text boxes; perspective and curved text are approximate.
+
+Original uploaded bytes are retained at `static/uploads/<project_id>/original.<ext>`. EXIF orientation is applied before inference. Transparent pixels are composited onto white. Recognition polygons are expanded by two pixels and repaired with OpenCV Telea inpainting (radius 3), saved to `static/processed/<project_id>/cleaned.png`. Only accepted recognition regions are erased. Empty recognition returns a separately saved background and an informational warning.
+
+PowerShell configuration (set before starting Flask):
+
+```powershell
+$env:OCR_CONFIDENCE_THRESHOLD = "0.5"
+$env:OCR_LANG = "en"
+.\.venv\Scripts\python.exe app.py
+```
+
+Install directly without activating the environment:
+
+```powershell
+py -3.10 -m venv .venv
+.\.venv\Scripts\python.exe -m pip install -r requirements.txt
+.\.venv\Scripts\python.exe -m unittest discover -v
+```
+
+Model downloads need internet on first use and write to Paddle's user cache. Runtime inference is local and free. A missing runtime/model raises HTTP 503; inference or repair failures raise HTTP 500. Cancellation stops the browser request, not work already running on the server. The Flask debug reloader creates a new model when the process restarts.
+
+Typography, color, and font size are estimates. Polygon inpainting works best on plain backgrounds and can blur photographs, gradients, or graphics behind text. Undetected or confidence-filtered text remains flattened in the background. Large images consume substantial CPU and memory. Uploads and processed files remain on disk until manually removed; this local editor has no retention scheduler.
+
+`test_extraction.py` uses mocked OCR predictions with real Pillow/OpenCV image processing. Existing edit API and layer utility checks also run through unittest discovery. Browser editing/export and real model inference require separate smoke checks; unit tests do not prove either.

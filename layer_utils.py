@@ -100,6 +100,14 @@ def ocr_results_to_layers(ocr_lines, image_width, image_height):
         if not _number(confidence) or not 0 <= confidence <= 1:
             raise ValueError("Confidence must be between 0 and 1.")
 
+        rotation = line.get("rotation", 0)
+        if not _number(rotation):
+            raise ValueError("Invalid text rotation.")
+        if "oriented_box" in line:
+            x, y, width, height = _get_box({"bbox": line["oriented_box"]})
+        color = line.get("color", "#ffffff")
+        if not re.fullmatch(r"#[0-9a-fA-F]{6}", str(color)):
+            raise ValueError("Invalid text color.")
         layers.append({
             "id": uuid.uuid4().hex,
             "text": text.strip(),
@@ -107,10 +115,10 @@ def ocr_results_to_layers(ocr_lines, image_width, image_height):
             "y": y,
             "width": width,
             "height": height,
-            "rotation": 0,
+            "rotation": rotation,
             "font_size": max(1, min(2000, round(height * 0.8))),
             "font_family": "Arial",
-            "color": "#ffffff",
+            "color": color,
             "confidence": float(confidence),
             "font_weight": "normal",
             "font_style": "normal",
