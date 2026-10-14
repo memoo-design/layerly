@@ -1,0 +1,9 @@
+{
+  "browser": "msedge",
+  "version": "155.0.4283.45",
+  "page_errors": [],
+  "workflow": "passed",
+  "pointer_gestures": "passed",
+  "export_pixel_checks": "passed",
+  "heading_bounds_max_error_px": 3
+}

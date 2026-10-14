@@ -45,7 +45,7 @@ class CommandTests(unittest.TestCase):
         for number in (np.float32(.8), np.float64(.9), np.int64(1)):
             self.layers[0]['confidence'] = number
             normalized = normalize_edit_layers(self.layers)
-            self.assertIn(type(normalized[0]['confidence']), (int, float))
+            self.assertIs(type(normalized[0]['confidence']), float)
             json.dumps(normalized, allow_nan=False)
         with patch('app.apply_command', return_value=(self.layers, 'Normalized')):
             response = self.post(layers=sample())

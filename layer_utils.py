@@ -126,6 +126,8 @@ def ocr_results_to_layers(ocr_lines, image_width, image_height):
             "font_style": "normal",
             "text_align": "left",
         })
+        # Only our local estimator supplies these fields; OCR geometry stays intact.
+        layers[-1].update(line.get('typography', {}))
 
     return layers
 
@@ -210,4 +212,8 @@ def normalize_edit_layers(layers):
             return [native(item) for item in value]
         return value
 
-    return native(copy.deepcopy(layers))
+    normalized = native(copy.deepcopy(layers))
+    for layer in normalized:
+        if layer.get('confidence') is not None:
+            layer['confidence'] = float(layer['confidence'])
+    return normalized

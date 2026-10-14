@@ -199,3 +199,59 @@ All 12 extraction tests pass, together with existing layer and edit API validati
 
 
 Command-bar fix verification: all 28 unittest cases passed, including existing extraction/inpainting regressions. The real browser flow recognized a synthetic two-line poster, changed the selected heading to blue, exported an 800x360 PNG containing blue glyphs, and changed all text to white. Other requested commands, error atomicity, manual layers without confidence, unchanged IDs/background, and property-panel updates were checked in the same browser workflow.
+
+## October 2026 audit update
+
+See [AUDIT_REPORT.md](AUDIT_REPORT.md) for the current feature matrix, changes,
+verification evidence and limitations. Earlier verification notes above describe
+previous sessions; the audit report records the latest run.
+
+Use the project Python 3.10 virtual environment (`.venv\Scripts\python.exe` on
+Windows). The default system Python may be a different, unsupported runtime.
+Install test tools with `python -m pip install -r requirements-dev.txt`.
+Run `python -m pytest -q`, `node --check static/js/editor.js`, and optionally
+`python browser_command_checks.py` (requires Edge, network access to CDN assets,
+and installed/cached Paddle models).
+
+The command bar is labeled as a local parser. It now supports relative title
+size instructions, selected subtitle replacement and actual layer removal with
+undo/redo. Click the zoom percentage to reset to 100%. Flask debug mode is disabled
+unless `FLASK_DEBUG=1`. Originals are saved only after successful OCR/restoration;
+successful projects still remain on disk until manually removed.
+
+## Follow-up: retention, typography and interaction verification
+
+The current behavior and detailed test evidence are documented in
+[LIMITATIONS_REPORT.md](LIMITATIONS_REPORT.md). It supersedes the earlier retention
+and missing-controls notes above.
+
+- Originals are processed in memory. Private repaired backgrounds expire after
+  24 hours without renewal; active editor tabs renew every minute. Configure
+  `LAYERLY_RETENTION_SECONDS` (minimum 300) and `LAYERLY_STORAGE_DIR` before startup.
+- Cleanup is automatic while the server runs and resumes on the first request
+  after restart. `python -m flask --app app cleanup-projects` performs a safe sweep.
+- Old unregistered files are preserved but no longer publicly served by Flask.
+- Duplicate, forward/backward, front/back, line spacing and letter spacing controls
+  use the existing undo/redo history and are preserved in PNG exports.
+- Restoration uses adaptive glyph masks and local gradient reconstruction where
+  reliable, with Telea/polygon fallbacks. Installed fonts are compared approximately;
+  glyph bounds are measured for positioning. Review complex posters before export.
+- `OCR_LANG` is checked at startup of inference. English is the default. French,
+  Spanish and German samples were tested with one Latin mobile recognizer; other
+  supported configuration values are documented but are not claimed as verified.
+
+Additional verification commands:
+
+```powershell
+.venv\Scripts\python.exe -m pytest -q
+.venv\Scripts\python.exe browser_command_checks.py --browser msedge
+.venv\Scripts\python.exe browser_command_checks.py --browser chrome
+.venv\Scripts\python.exe imaging_examples.py
+.venv\Scripts\python.exe multilingual_checks.py
+```
+
+The browser harness also accepts `--browser firefox` if a Playwright-compatible
+Firefox runtime is installed. This workspace has Chrome and Edge; Firefox was
+unavailable. Browser PNGs, recognition results and visual examples are saved in
+`verification/`. The real-poster artifacts contain local project poster content;
+they are not uploaded anywhere.

@@ -1,0 +1,34 @@
+[
+  {
+    "kind": "plain",
+    "method": "local gradient with glyph mask",
+    "old_mask_pixels": 14192,
+    "new_mask_pixels": 8893,
+    "old_mae": 1.8173618940248026,
+    "new_mae": 0.0
+  },
+  {
+    "kind": "gradient",
+    "method": "local gradient with glyph mask",
+    "old_mask_pixels": 14192,
+    "new_mask_pixels": 8884,
+    "old_mae": 1.7275930101465615,
+    "new_mae": 0.30503100338218714
+  },
+  {
+    "kind": "texture",
+    "method": "color glyph mask with Telea",
+    "old_mask_pixels": 14192,
+    "new_mask_pixels": 7580,
+    "old_mae": 8.398886696730552,
+    "new_mae": 2.6815811724915446
+  },
+  {
+    "kind": "complex",
+    "method": "color glyph mask with Telea",
+    "old_mask_pixels": 14192,
+    "new_mask_pixels": 7636,
+    "old_mae": 15.242695415257423,
+    "new_mae": 1.914576287110109
+  }
+]

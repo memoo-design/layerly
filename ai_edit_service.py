@@ -13,7 +13,7 @@ COLORS = {
 }
 EDITABLE_FIELDS = ('text', 'color', 'font_size', 'font_family', 'font_weight',
                    'font_style', 'text_align', 'x', 'y', 'rotation', 'visible')
-SUBJECT = r"(?:the\s+)?(?:selected\s+text|(?:all|every|each)\s+(?:the\s+)?text(?:\s+layers?)?|all\s+layers|heading|headline|title|text)"
+SUBJECT = r"(?:the\s+)?(?:selected\s+text|(?:all|every|each)\s+(?:the\s+)?text(?:\s+layers?)?|all\s+layers|heading|headline|title|subtitle|bottom\s+text|text)"
 
 
 class CommandError(ValueError):
@@ -21,6 +21,23 @@ class CommandError(ValueError):
 
 
 def _target(layers, selected_id, subject):
+    if re.search(r'\bsubtitle\b', subject, re.I):
+        candidates = [l for l in layers if l.get('role') == 'subtitle' or l['id'] == 'subtitle']
+        if len(candidates) == 1:
+            return candidates
+        selected = [l for l in layers if l['id'] == selected_id]
+        if selected:
+            return selected
+        raise CommandError('Select the subtitle first; OCR does not identify semantic subtitles.')
+    if re.search(r'\bbottom\s+text\b', subject, re.I):
+        lowest = max((l['y'] for l in layers), default=None)
+        candidates = [l for l in layers if l['y'] == lowest]
+        if len(candidates) == 1:
+            return candidates
+        selected = [l for l in candidates if l['id'] == selected_id]
+        if selected:
+            return selected
+        raise CommandError('The bottom text is ambiguous. Select the intended layer.')
     if re.search(r"\b(all|every|each)\b", subject, re.I):
         if not layers:
             raise CommandError('There are no text layers to edit.')
@@ -49,6 +66,8 @@ def _target(layers, selected_id, subject):
 
 def _unquote(text):
     text = text.strip()
+    if len(text) >= 3 and text[-1] in '.!' and (text[0], text[-2]) in [('"', '"'), ("'", "'"), ('\u201c', '\u201d')]:
+        text = text[:-1]
     if len(text) >= 2 and (text[0], text[-1]) in [('"', '"'), ("'", "'"), ('\u201c', '\u201d')]:
         return text[1:-1]
     return text
@@ -59,13 +78,17 @@ def apply_command(prompt, layers, selected_layer_id=None, canvas_width=None):
     updated = copy.deepcopy(layers)
     p = prompt.strip().rstrip('.!')
     subject, properties, action = None, {}, None
+    removal = re.fullmatch(rf'(?:remove|delete)\s+({SUBJECT})', p, re.I)
+    if removal:
+        ids = {l['id'] for l in _target(updated, selected_layer_id, removal[1])}
+        return [l for l in updated if l['id'] not in ids], f'Removed {len(ids)} text layer(s).'
     # Parse replacement before formatting: words inside replacement text are literal.
     replace = re.fullmatch(r'(?:replace|change|set|update)\s+(.+?)\s+(?:with|to)\s+(.+)', prompt.strip(), re.I)
     if replace and not re.search(r'\b(colou?rs?|(?:font\s+)?size)\b', replace[1], re.I):
         before, after = _unquote(replace[1]), _unquote(replace[2])
         if len(after) > 10000:
             raise CommandError('Text cannot exceed 10,000 characters.')
-        if re.fullmatch(SUBJECT, before, re.I) and re.search(r'\btext\b', before, re.I):
+        if re.fullmatch(SUBJECT, before, re.I):
             target = _target(updated, selected_layer_id, before)
             for layer in target:
                 layer['text'] = after
@@ -99,6 +122,8 @@ def apply_command(prompt, layers, selected_layer_id=None, canvas_width=None):
         else:
             match = re.fullmatch(rf'(?:make\s+)?({SUBJECT})\s+(bigger|larger|smaller)', p, re.I)
             increase = re.fullmatch(rf'(increase|decrease)\s+(?:the\s+)?(?:font\s+)?size\s+of\s+({SUBJECT})', p, re.I)
+            direct_increase = re.fullmatch(rf'(increase|decrease)\s+({SUBJECT})\s+(?:font\s+)?size', p, re.I)
+            increase = increase or direct_increase
             size = re.fullmatch(rf'(?:set|change|increase)\s+({SUBJECT})\s+(?:font\s+)?size\s+(?:to\s+)?(\d+(?:\.\d+)?)', p, re.I)
             rotation = re.fullmatch(rf'rotate\s+({SUBJECT})\s+(?:by\s+|to\s+)?(-?\d+(?:\.\d+)?)(?:\s*(?:degrees?|\u00b0))?', p, re.I)
             center = re.fullmatch(rf'(?:center|centre)\s+({SUBJECT})(?:\s+horizontally)?|move\s+({SUBJECT})\s+to\s+(?:the\s+)?cent(?:er|re)', p, re.I)
@@ -148,7 +173,12 @@ def apply_command(prompt, layers, selected_layer_id=None, canvas_width=None):
 def layer_changes(before, after):
     """Return only user-editable properties; OCR metadata and geometry are retained."""
     changes = []
-    for old, new in zip(before, after):
+    remaining = {layer['id']: layer for layer in after}
+    for old in before:
+        if old['id'] not in remaining:
+            changes.append({'id': old['id'], 'delete': True})
+            continue
+        new = remaining[old['id']]
         properties = {key: new[key] for key in EDITABLE_FIELDS
                       if key in new and new[key] != old.get(key)}
         if properties:

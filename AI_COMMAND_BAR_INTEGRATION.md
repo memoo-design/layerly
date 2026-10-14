@@ -1,57 +1,45 @@
-# Layerly AI command bar integration
+﻿# Layerly command bar integration
 
-Replace your project's `app.py` with the provided updated file (back up your existing file first), and add `ai_edit_service.py` beside it. This version is based on the provided `app.py` and preserves its OCR endpoint. If Codex changed your `app.py` after the uploaded snapshot, **do not overwrite it**; instead import `apply_command, CommandError` and replace only the existing `/api/edit-text` route's HTTP 501 return with the new call.
+The command bar is already integrated in `app.py`, `ai_edit_service.py` and
+`static/js/editor.js`. Do not replace the application with an older sample.
+This is a deterministic local parser, not a generative AI service.
 
-## Frontend API request
+POST `/api/edit-text` accepts a JSON object containing `project_id`, `prompt`,
+`layers`, optional `selected_layer_id`, and canvas `width` (needed for centering).
+Layers use original-image coordinates plus optional scale and bounding metadata.
+OCR confidence is preserved when present and is optional for manual layers.
 
-Send a POST to `/api/edit-text` with:
+Success returns `project_id`, `layers`, `message`, and `changes`. A change is either
+`{"id":"layer-id","properties":{"color":"#0000ff"}}` or
+`{"id":"layer-id","delete":true}`. The frontend validates the entire response,
+applies it to existing Fabric objects, and commits one history snapshot. It does
+not replace the background. Stale responses are rejected. Invalid requests return
+400; unsupported or ambiguous commands return 422 with an `error` string.
 
-```json
-{
-  "project_id": "id-returned-from-extract-text",
-  "prompt": "make the selected text blue",
-  "selected_layer_id": "selected-layer-id",
-  "layers": ["your current serialized layer objects"]
-}
-```
+Supported examples:
 
-The response on success is `{"project_id":"...", "layers":[...], "message":"..."}`. On error it returns `{"error":"..."}` and status 400 or 422.
+- Change the heading color to blue.
+- Increase the title font size.
+- Move the heading to the center.
+- Make all text bold.
+- Change the subtitle to 'Welcome to Layerly'.
+- Remove the bottom text.
+- Make the selected text smaller.
+- Set selected text size to 72.
+- Change SALE to MEGA SALE.
+- Rotate selected text 15 degrees.
+- Align text right.
 
-Example browser-side transport (adapt to your existing editor state and Fabric serialization):
+Heading/title resolves an explicit role or unique largest displayed font. Subtitle
+requires an explicit role or selection because OCR does not infer semantics.
+Bottom text means the lowest anchor, with selection required for ties. Generic
+text commands require selection; `all text` explicitly targets every layer.
+Quoted replacement contents are literal, including words resembling commands.
+Removal actually deletes editable text objects and is undoable.
 
-```js
-async function requestAiTextEdit({projectId, prompt, selectedLayerId, layers}) {
-  const response = await fetch('/api/edit-text', {
-    method: 'POST',
-    headers: {'Content-Type': 'application/json'},
-    body: JSON.stringify({
-      project_id: projectId,
-      prompt,
-      selected_layer_id: selectedLayerId ?? null,
-      layers
-    })
-  });
-  const result = await response.json();
-  if (!response.ok) throw new Error(result.error || 'AI edit failed');
-  return result;
-}
-```
+The synthetic demo retains its separate, smaller browser-only parser. Its label
+and error messages distinguish it from normal uploaded projects.
 
-Use your editor's **existing** layer-to-Fabric renderer to apply `result.layers` to the canvas and synchronize the layers panel. Capture an undo-history snapshot before applying the returned layers. Never replace the cleaned background or rasterize the text. Disable the submit button while a request is in flight. Display `result.message` on success and the returned error on failure.
-
-## Supported commands
-
-- `make the selected text blue`, `change all text color to #123abc`
-- `make the selected text larger` / `smaller`
-- `set font size to 72`
-- `change text to "MEGA SALE"`
-- `replace "SALE" with "DEALS"`
-- `rotate selected text 15 degrees`
-- `align text left`, `center the selected text`
-- `make the selected text bold`, `make the selected text italic`
-
-This is a **rule-based offline interpreter**, not a generative LLM. It does not interpret arbitrary creative requests. With multiple layers, select one first or say `all text`. A heading/title reference without a selected layer returns an error instead of guessing.
-
-## Verification
-
-Run `python -m py_compile app.py ai_edit_service.py` and start Flask. The backend module was syntax checked and sample commands exercised, but full Flask/frontend integration could not be tested here because the current frontend files were not supplied.
+Run `.venv\Scripts\python.exe -m pytest -q` and
+`.venv\Scripts\python.exe browser_command_checks.py` for API and real-browser
+verification. See `AUDIT_REPORT.md` for test results and remaining limits.

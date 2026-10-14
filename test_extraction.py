@@ -12,6 +12,7 @@ import app as backend
 from background_service import repair_background
 from layer_utils import ocr_results_to_layers, validate_layers
 from ocr_service import normalize_results, OCRService, OCRProcessingError, OCRUnavailable
+from project_store import ProjectStore
 
 
 def predictions(text='SALE', score=.98):
@@ -24,8 +25,7 @@ class ExtractionTests(unittest.TestCase):
         self.temp = tempfile.TemporaryDirectory()
         self.addCleanup(self.temp.cleanup)
         self.root = Path(self.temp.name)
-        for name, value in [('UPLOAD_DIR', self.root / 'uploads'),
-                            ('PROCESSED_DIR', self.root / 'processed')]:
+        for name, value in [('project_store', ProjectStore(self.root / 'private'))]:
             patcher = patch.object(backend, name, value)
             patcher.start()
             self.addCleanup(patcher.stop)
@@ -51,10 +51,12 @@ class ExtractionTests(unittest.TestCase):
                 self.assertTrue(validate_layers(data['layers'])[0])
                 self.assertEqual(data['layers'][0]['text'], 'SALE')
                 self.assertEqual(data['warnings'], [])
-                cleaned = self.root / 'processed' / data['project_id'] / 'cleaned.png'
+                cleaned = self.root / 'private' / data['project_id'] / 'cleaned.png'
                 with Image.open(cleaned) as image:
                     self.assertGreater(np.array(image)[20, 40].mean(), 240)
-                self.assertEqual(len(list((self.root / 'uploads' / data['project_id']).iterdir())), 1)
+                self.assertFalse((self.root / 'uploads').exists())
+                self.assertEqual(self.client.get(data['background_url']).status_code, 200)
+                self.assertEqual(self.client.get(data['background_url'].split('?')[0]).status_code, 404)
 
     def test_coordinates_and_rotation(self):
         layer = ocr_results_to_layers(self.lines, 100, 60)[0]
@@ -86,7 +88,7 @@ class ExtractionTests(unittest.TestCase):
             data = self.upload().get_json()
         self.assertEqual(data['layers'], [])
         self.assertTrue(data['warnings'])
-        self.assertTrue((self.root / 'processed' / data['project_id'] / 'cleaned.png').exists())
+        self.assertTrue((self.root / 'private' / data['project_id'] / 'cleaned.png').exists())
 
     def test_exif_orientation(self):
         stream = io.BytesIO()
@@ -130,12 +132,14 @@ class ExtractionTests(unittest.TestCase):
         with patch.object(backend.ocr_service, 'extract', return_value=self.lines), \
              patch.object(backend, 'repair_background', side_effect=OSError('disk')):
             self.assertEqual(self.upload().status_code, 500)
+        self.assertFalse((self.root / 'uploads').exists())
 
     def test_mask_is_local(self):
         rgb = np.full((60, 100, 3), 255, np.uint8)
         rgb[12:28, 12:68] = 0
         mask = repair_background(rgb, self.lines, self.root / 'clean.png')
-        self.assertEqual(mask[9, 10], 255)
+        self.assertEqual(mask[12, 12], 255)
+        self.assertEqual(mask[9, 10], 0)
         self.assertEqual(mask[0, 0], 0)
         with Image.open(self.root / 'clean.png') as image:
             self.assertTrue(np.array_equal(np.array(image)[0], rgb[0]))

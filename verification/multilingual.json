@@ -1,0 +1,29 @@
+[
+  {
+    "language": "French",
+    "expected": "Bonjour été café",
+    "actual": "Bonjour été café",
+    "exact": true,
+    "confidence": [
+      0.994598388671875
+    ]
+  },
+  {
+    "language": "Spanish",
+    "expected": "Oferta mañana café",
+    "actual": "Oferta mañana café",
+    "exact": true,
+    "confidence": [
+      0.9993979334831238
+    ]
+  },
+  {
+    "language": "German",
+    "expected": "Grüße schöne Welt",
+    "actual": "Grüße schöne Welt",
+    "exact": true,
+    "confidence": [
+      0.9988441467285156
+    ]
+  }
+]

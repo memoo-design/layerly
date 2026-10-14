@@ -6,6 +6,16 @@
     zoom: 1, history: [], index: -1, restoring: false, busy: false, demo: false,
     request: null, uploadToken: 0, textTimer: null, noticeTimer: null, commandBusy: false, projectId: null };
   const custom = ['layerId', 'confidence'];
+  let leaseUrl = null;
+  async function renewLease() {
+    if (!leaseUrl) return;
+    try {
+      const response = await fetch(leaseUrl, { method: 'POST', referrerPolicy: 'no-referrer' });
+      if (!response.ok) { leaseUrl = null; notify('The stored background expired. Export your current canvas before closing this tab; upload again to start a new session.'); }
+    } catch (_) { /* Retry after a transient connection loss. */ }
+  }
+  setInterval(renewLease, 60000);
+  document.addEventListener('visibilitychange', () => { if (!document.hidden) renewLease(); });
   const fonts = ['Arial', 'DM Sans', 'Manrope', 'Georgia', 'Times New Roman', 'Courier New'];
   function notify(message) {
     $('notice').textContent = message; $('notice').hidden = false;
@@ -33,6 +43,7 @@
     if (!['image/png', 'image/jpeg'].includes(file.type)) { message('Choose a PNG or JPEG image.'); return; }
     if (file.size > 20 * 1024 * 1024) { message('Choose an image smaller than 20 MB.'); return; }
     const url = URL.createObjectURL(file);
+    message('Loading image preview…'); $('extract').disabled = true; $('dropZone').setAttribute('aria-busy', 'true');
     try {
       const img = await imageFrom(url);
       if (token !== state.uploadToken) { URL.revokeObjectURL(url); return; }
@@ -43,6 +54,7 @@
       $('dropZone').classList.add('has-image'); $('fileDetails').textContent = `${file.name} · ${img.naturalWidth} × ${img.naturalHeight} px`;
       $('chooseFile').textContent = 'Replace image'; $('extract').disabled = false; message('');
     } catch (err) { URL.revokeObjectURL(url); if (token === state.uploadToken) message(err.message); }
+    finally { if (token === state.uploadToken) { $('dropZone').setAttribute('aria-busy', 'false'); $('extract').disabled = !state.file; } }
   }
   $('chooseFile').onclick = () => $('fileInput').click();
   $('fileInput').onchange = e => { upload(e.target.files[0]); e.target.value = ''; };
@@ -137,6 +149,7 @@
     const fontWarnings = await loadFonts(data.layers);
     if (signal?.aborted) throw new DOMException('Request cancelled', 'AbortError');
     const c = canvas(); clearTimeout(state.textTimer); state.textTimer = null;
+    leaseUrl = !demo && new URL(data.background_url, location.href).pathname.startsWith('/api/projects/') ? data.background_url : null;
     state.restoring = true; c.clear(); state.width = data.width; state.height = data.height; state.demo = demo; state.projectId = data.project_id; commandMessage('');
     c.setBackgroundImage(new fabric.Image(background, { originX: 'left', originY: 'top', left: 0, top: 0, crossOrigin: demo ? null : 'anonymous' }), () => c.requestRenderAll());
     data.layers.forEach(layer => {
@@ -144,10 +157,13 @@
         left: layer.x, top: layer.y, width: layer.width, angle: layer.rotation,
         originX: 'left', originY: 'top', fontSize: layer.font_size, fontFamily: layer.font_family,
         fill: layer.color, fontWeight: layer.font_weight || 'normal', fontStyle: layer.font_style || 'normal',
-        textAlign: layer.text_align || 'left', splitByGrapheme: false });
+        textAlign: layer.text_align || 'left', lineHeight: layer.line_height || 1.16,
+        charSpacing: layer.char_spacing || 0, splitByGrapheme: false });
       // Fabric computes text height from font metrics. Preserve the backend box height.
       object.scaleX = layer.width / Math.max(1, object.width);
-      object.scaleY = layer.height / Math.max(1, object.height); object.setCoords(); c.add(object);
+      object.scaleY = layer.height / Math.max(1, object.height);
+      if (layer.fit_ink && !layer.text.includes('\n')) fitInk(object, layer);
+      object.setCoords(); c.add(object);
     });
     state.restoring = false; state.history = []; state.index = -1; commit();
     $('projectName').textContent = demo ? 'Beyond the Ordinary · Demo' : state.file.name;
@@ -161,6 +177,29 @@
     if (!data.layers.length && !warnings.length) warnings.push('No text layers were detected. You can add your own text.');
     warnings.forEach(text => { const p = document.createElement('p'); p.textContent = text; $('warnings').append(p); });
     if (c.getObjects().length) c.setActiveObject(c.getObjects()[0]); sync();
+  }
+  function fitInk(object, layer) {
+    // Measure actual glyph pixels rather than Fabric's line box and leading.
+    const measure = document.createElement('canvas').getContext('2d');
+    measure.font = `${object.fontWeight} 100px "${object.fontFamily}"`;
+    const width = Math.ceil(measure.measureText(object.text).width + 8);
+    if (width > 4096) return;
+    const probe = new fabric.StaticCanvas(null, { width: width + 32, height: 240, enableRetinaScaling: false });
+    try {
+      probe.add(new fabric.Textbox(object.text, { left: 16, top: 16, width, fontSize: 100,
+        fontFamily: object.fontFamily, fontWeight: object.fontWeight, fill: '#000000', lineHeight: 1 }));
+      probe.renderAll();
+      const pixels = probe.contextContainer.getImageData(0, 0, width+32, 240).data;
+      let x0 = width+32, y0 = 240, x1 = 0, y1 = 0;
+      for (let y=0; y<240; y++) for (let x=0; x<width+32; x++) {
+        if (pixels[(y*(width+32)+x)*4+3] > 32) { x0=Math.min(x0,x); x1=Math.max(x1,x); y0=Math.min(y0,y); y1=Math.max(y1,y); }
+      }
+      if (x1 <= x0 || y1 <= y0) return;
+      const sy = layer.height/(y1-y0+1), sx = layer.width/(x1-x0+1), angle = layer.rotation*Math.PI/180;
+      object.set({ fontSize: Math.min(2000, 100*sy), width: width*sy, scaleX: sx/sy, scaleY: 1,
+        left: layer.x - (x0-16)*sx*Math.cos(angle) + (y0-16)*sy*Math.sin(angle),
+        top: layer.y - (x0-16)*sx*Math.sin(angle) - (y0-16)*sy*Math.cos(angle) });
+    } finally { probe.dispose(); }
   }
   function snapshot() { return JSON.stringify(state.canvas.toJSON(custom)); }
   function commit() {
@@ -181,7 +220,12 @@
     const next = state.index + direction; if (next < 0 || next >= state.history.length) return;
     state.restoring = true; $('properties').disabled = true; state.index = next; historyButtons();
     const selected = state.canvas.getActiveObject()?.layerId;
-    state.canvas.loadFromJSON(state.history[next], () => {
+    const background = state.canvas.backgroundImage, saved = JSON.parse(state.history[next]);
+    delete saved.backgroundImage;
+    state.canvas.loadFromJSON(saved, () => {
+      // Backgrounds never change within a project's history. Reuse decoded pixels
+      // so an offline tab or an expired server lease cannot erase its background.
+      state.canvas.setBackgroundImage(background, () => state.canvas.requestRenderAll());
       state.restoring = false; setZoom(state.zoom); const object = state.canvas.getObjects().find(o => o.layerId === selected);
       if (object) state.canvas.setActiveObject(object); sync(); historyButtons();
     });
@@ -210,6 +254,7 @@
     if (document.activeElement !== $('textContent')) $('textContent').value = o.text;
     if (![...$('fontFamily').options].some(option => option.value === o.fontFamily)) { const option = new Option(o.fontFamily, o.fontFamily); $('fontFamily').add(option); }
     $('fontFamily').value = o.fontFamily; $('fontSize').value = Number(o.fontSize.toFixed(1)); $('alignment').value = o.textAlign;
+    $('lineHeight').value = o.lineHeight; $('charSpacing').value = o.charSpacing;
     const color = typeof o.fill === 'string' && /^#[0-9a-f]{6}$/i.test(o.fill) ? o.fill : '#000000';
     $('textColor').value = color; $('colorHex').textContent = color.toUpperCase();
     $('posX').value = Number(o.left.toFixed(1)); $('posY').value = Number(o.top.toFixed(1));
@@ -241,6 +286,8 @@
     };
   };
   numeric('fontSize', value => ({ fontSize: value }), 1, 2000);
+  numeric('lineHeight', value => ({ lineHeight: value }), .5, 3);
+  numeric('charSpacing', value => ({ charSpacing: value }), -100, 1000);
   numeric('posX', value => ({ left: value })); numeric('posY', value => ({ top: value }));
   numeric('layerWidth', (value, o) => ({ scaleX: value / o.width }), 1);
   numeric('layerHeight', (value, o) => ({ scaleY: value / o.height }), 1);
@@ -251,8 +298,25 @@
   $('italic').onclick = () => { const o = active(); if (o) modify({ fontStyle: o.fontStyle === 'italic' ? 'normal' : 'italic' }); };
   $('visibility').onclick = () => { if (active()) modify({ visible: !active().visible }); };
   $('deleteText').onclick = () => { if (!active() || state.restoring) return; state.canvas.remove(active()); commit(); sync(); };
+  $('duplicateText').onclick = () => {
+    if (!active() || state.restoring) return;
+    if (state.canvas.getObjects().length >= 500) { notify('At most 500 text layers are supported.'); return; }
+    const original = active(), projectId = state.projectId;
+    original.clone(copy => {
+      if (state.restoring || projectId !== state.projectId) return;
+      copy.set({ layerId: crypto.randomUUID(), left: original.left + 16, top: original.top + 16 });
+      state.canvas.add(copy); state.canvas.setActiveObject(copy); copy.setCoords(); commit(); sync();
+    }, custom);
+  };
+  for (const [id, method] of Object.entries({bringForward: 'bringForward', sendBackward: 'sendBackwards', bringFront: 'bringToFront', sendBack: 'sendToBack'})) {
+    $(id).onclick = () => {
+      if (!active() || state.restoring) return;
+      state.canvas[method](active()); state.canvas.requestRenderAll(); commit(); sync();
+    };
+  }
   $('addText').onclick = () => {
     if (!state.canvas || state.restoring) return;
+    if (state.canvas.getObjects().length >= 500) { notify('At most 500 text layers are supported.'); return; }
     const o = new fabric.Textbox('New text', { layerId: `text-${Date.now()}-${Math.random().toString(36).slice(2)}`,
       left: state.width * .1, top: state.height * .1, width: state.width * .6,
       fontSize: Math.max(12, Math.round(state.width / 20)), fontFamily: 'Arial', fill: '#ffffff' });
@@ -264,7 +328,7 @@
   function syncCommandTarget() {
     const o = active();
     $('commandTarget').textContent = o ? `Selected: ${o.text.slice(0, 70) || 'Empty text'} (${o.layerId})` : 'Selected: no text layer';
-    $('commandMode').textContent = state.demo ? 'DEMO MODE · Local rule parser, no AI service' : 'Flask AI backend · Text layers only';
+    $('commandMode').textContent = state.demo ? 'DEMO MODE · Local rule parser, no AI service' : 'Local command parser · No AI service';
   }
   function currentLayers() {
     return state.canvas.getObjects().map(o => {
@@ -328,6 +392,7 @@
       const object = state.canvas.getObjects().find(o => o.layerId === change?.id);
       if (!object || ids.has(change.id) || !targets.includes(change.id)) throw new Error('The backend returned an unknown, duplicate or unauthorized layer target. No changes applied.');
       ids.add(change.id);
+      if (change.delete === true && Object.keys(change).every(key => ['id', 'delete'].includes(key))) return { object, update: {}, remove: true };
       const props = change.properties;
       if (!props || typeof props !== 'object' || Array.isArray(props) || !Object.keys(props).length) throw new Error('Each change needs a nonempty properties object.');
       const update = {};
@@ -396,6 +461,7 @@
           }
           object.setCoords();
         });
+        changes.filter(change => change.remove).forEach(({ object }) => state.canvas.remove(object));
       } catch (error) {
         backups.forEach(({ object, values }) => { object.set(values); object.setCoords(); });
         state.canvas.requestRenderAll();
@@ -423,24 +489,30 @@
     const stage = $('canvasStage'); setZoom(Math.min((stage.clientWidth - 48) / state.width, (stage.clientHeight - 48) / state.height, 1));
   }
   $('zoomOut').onclick = () => setZoom(state.zoom / 1.2); $('zoomIn').onclick = () => setZoom(state.zoom * 1.2); $('fit').onclick = fit;
+  $('zoomLabel').onclick = () => setZoom(1);
   window.addEventListener('resize', () => { if (state.canvas && !$('editor').hidden) state.canvas.calcOffset(); });
   $('export').onclick = async () => {
     if (!state.canvas || state.restoring) return;
     if (active()?.isEditing) active().exitEditing(); if (state.textTimer) commit();
     $('export').disabled = true; $('export').textContent = 'Exporting…';
+    const exportWidth = state.width, exportHeight = state.height;
+    const exportName = state.demo ? 'layerly-demo.png' : `${state.file.name.replace(/\.[^.]+$/, '')}-edited.png`;
+    const saved = state.canvas.toJSON(custom), background = state.canvas.backgroundImage;
+    delete saved.backgroundImage;
     let output;
     try {
       await document.fonts.ready;
       // Isolated canvas has original pixel dimensions and identity viewport.
-      output = new fabric.StaticCanvas(null, { width: state.width, height: state.height, enableRetinaScaling: false });
-      await new Promise(resolve => output.loadFromJSON(state.canvas.toJSON(custom), resolve));
+      output = new fabric.StaticCanvas(null, { width: exportWidth, height: exportHeight, enableRetinaScaling: false });
+      await new Promise(resolve => output.loadFromJSON(saved, resolve));
+      if (background) output.setBackgroundImage(new fabric.Image(background.getElement(), background.toObject()), () => {});
       output.setViewportTransform([1, 0, 0, 1, 0, 0]); output.renderAll();
       const blob = await new Promise(resolve => output.lowerCanvasEl.toBlob(resolve, 'image/png'));
       if (!blob) throw new Error('The browser could not create the PNG.');
       const url = URL.createObjectURL(blob), link = document.createElement('a');
-      link.href = url; link.download = state.demo ? 'layerly-demo.png' : `${state.file.name.replace(/\.[^.]+$/, '')}-edited.png`;
+      link.href = url; link.download = exportName;
       document.body.append(link); link.click(); link.remove(); setTimeout(() => URL.revokeObjectURL(url), 10000);
-      notify(`PNG exported at ${state.width} × ${state.height} pixels.`);
+      notify(`PNG exported at ${exportWidth} × ${exportHeight} pixels.`);
     } catch (err) { notify(`Export failed: ${err.message}`); }
     finally { output?.dispose(); $('export').disabled = false; $('export').textContent = '↓ Download PNG'; }
   };

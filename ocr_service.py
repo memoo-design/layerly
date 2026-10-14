@@ -6,6 +6,11 @@ from threading import Lock
 
 import numpy as np
 
+# Explicit, bounded deployment choices confirmed against installed PaddleOCR 3.7
+# PP-OCRv5 model mapping. This is model availability, not a quality guarantee.
+SUPPORTED_LANGUAGES = ('en', 'fr', 'de', 'es', 'pt', 'it', 'ar', 'ur', 'fa',
+                       'hi', 'ru', 'ch', 'chinese_cht', 'japan', 'korean', 'th', 'el', 'te', 'ta')
+
 
 class OCRUnavailable(RuntimeError):
     pass
@@ -64,12 +69,15 @@ def normalize_results(results, width, height, threshold=0.5, modern=True):
 
 
 class OCRService:
-    def __init__(self):
+    def __init__(self, language=None):
         self._model = None
         self._lock = Lock()
         self._modern = True
+        self.language = language or os.getenv('OCR_LANG', 'en')
 
     def extract(self, bgr, threshold=0.5):
+        if self.language not in SUPPORTED_LANGUAGES:
+            raise OCRUnavailable(f'Unsupported OCR_LANG {self.language!r}. Choose one of: {", ".join(SUPPORTED_LANGUAGES)}. Restart after changing it.')
         if not 0 <= threshold <= 1:
             raise ValueError('OCR confidence threshold must be between 0 and 1.')
         # Paddle predictors are not shared concurrently across Flask threads.
@@ -82,12 +90,12 @@ class OCRService:
                     if major == 3:
                         # Paddle 3.3.1's Windows oneDNN PIR path fails on these models.
                         self._model = PaddleOCR(device='cpu', enable_mkldnn=False,
-                            lang=os.getenv('OCR_LANG', 'en'),
+                            lang=self.language,
                             ocr_version='PP-OCRv5',
                             use_doc_orientation_classify=False, use_doc_unwarping=False,
                             use_textline_orientation=False)
                     elif major == 2:
-                        self._model = PaddleOCR(use_gpu=False, lang=os.getenv('OCR_LANG', 'en'),
+                        self._model = PaddleOCR(use_gpu=False, lang=self.language,
                                                use_angle_cls=True, show_log=False)
                     else:
                         raise RuntimeError('Supported PaddleOCR versions are 2.x and 3.x.')
